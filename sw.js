@@ -1,20 +1,24 @@
-// sw.js — InvCalc Pro Suite v1.4
+// sw.js — InvCalc Pro Suite v1.5
 // ─────────────────────────────────────────────────────────────────
 // HOW TO UPDATE: bump CACHE_NAME here AND APP_VERSION in invpro.html
 // to the same value on every deploy. Old caches auto-delete.
+// GitHub Pages base: /Investor-s-PRO-Suite/
 // ─────────────────────────────────────────────────────────────────
 
 const CACHE_NAME = 'invcalc-v1.5';
+const BASE = '/Investor-s-PRO-Suite/';
 
-// Only pre-cache local files — never external URLs in ASSETS
 const PRECACHE_ASSETS = [
-  '/invpro.html',
-  '/manifest.json',
+  BASE + 'invpro.html',
+  BASE + 'manifest.json',
+  BASE + 'icons/icon-192.png',
+  BASE + 'icons/icon-512.png',
+  BASE + 'icons/apple-touch-icon.png',
+  BASE + 'icons/favicon-32.png',
+  BASE + 'icons/favicon-16.png',
 ];
 
 // ── INSTALL ───────────────────────────────────────────────────────
-// Pre-cache assets individually so a missing manifest.json won't
-// block the entire SW from installing. Then activate immediately.
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
@@ -23,17 +27,15 @@ self.addEventListener('install', event => {
           PRECACHE_ASSETS.map(url =>
             fetch(url)
               .then(res => { if (res.ok) return cache.put(url, res); })
-              .catch(() => {}) // ignore unreachable assets
+              .catch(() => {})
           )
         )
       )
-      .then(() => self.skipWaiting()) // activate immediately
+      .then(() => self.skipWaiting())
   );
 });
 
 // ── ACTIVATE ──────────────────────────────────────────────────────
-// Delete every cache that doesn't match the current CACHE_NAME.
-// This removes ALL previous versions automatically.
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys()
@@ -42,13 +44,11 @@ self.addEventListener('activate', event => {
         if (old.length) console.log('[SW] Removing old caches:', old);
         return Promise.all(old.map(n => caches.delete(n)));
       })
-      .then(() => self.clients.claim()) // take control of all open pages
+      .then(() => self.clients.claim())
   );
 });
 
 // ── MESSAGE ───────────────────────────────────────────────────────
-// invpro.html sends { type: 'SKIP_WAITING' } when it detects a new
-// SW is waiting. This makes it activate without a tab close.
 self.addEventListener('message', event => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
@@ -67,7 +67,6 @@ self.addEventListener('fetch', event => {
   }
 
   // ② Google Fonts / CDN (Chart.js, jsPDF, SheetJS) — cache-first.
-  //    These are versioned URLs that never change content.
   if (
     url.hostname.includes('fonts.googleapis.com') ||
     url.hostname.includes('fonts.gstatic.com')    ||
@@ -88,22 +87,20 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // ③ Main app (invpro.html or root /) — NETWORK-FIRST.
-  //    Always try to get the latest version; cache only for offline.
-  //    This prevents the old Russian-language version from appearing.
-  if (url.pathname === '/invpro.html' || url.pathname === '/') {
+  // ③ Main app (invpro.html) — NETWORK-FIRST.
+  if (url.pathname === BASE + 'invpro.html' || url.pathname === BASE) {
     event.respondWith(
       fetch(request)
         .then(res => {
           if (res.ok) {
-            // Store fresh copy so offline fallback is up to date
             caches.open(CACHE_NAME)
-              .then(cache => cache.put('/invpro.html', res.clone()));
+              .then(cache => cache.put(BASE + 'invpro.html', res.clone()));
           }
           return res;
         })
         .catch(() =>
-          caches.match('/invpro.html').then(c => c || caches.match('/'))
+          caches.match(BASE + 'invpro.html')
+            .then(c => c || caches.match(BASE))
         )
     );
     return;
