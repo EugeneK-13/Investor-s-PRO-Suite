@@ -1,0 +1,31 @@
+{
+  "name": "Инвестиционный Калькулятор Pro",
+  "short_name": "Калькулятор Pro",
+  "description": "Профессиональный анализ акций и опционов с Finnhub API",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1e293b",
+  "theme_color": "#667eea",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><defs><linearGradient id='bg' x1='0' y1='0' x2='1' y2='1'><stop offset='0%25' stop-color='%23667eea'/><stop offset='100%25' stop-color='%23764ba2'/></linearGradient></defs><rect width='192' height='192' fill='url(%23bg)' rx='35'/><g transform='translate(30,50)'><rect x='10' y='40' width='8' height='30' fill='%2310b981'/><line x1='14' y1='30' x2='14' y2='40' stroke='%2310b981' stroke-width='2'/><line x1='14' y1='70' x2='14' y2='80' stroke='%2310b981' stroke-width='2'/><rect x='30' y='20' width='8' height='40' fill='%23ef4444'/><line x1='34' y1='10' x2='34' y2='20' stroke='%23ef4444' stroke-width='2'/><line x1='34' y1='60' x2='34' y2='70' stroke='%23ef4444' stroke-width='2'/><rect x='50' y='35' width='8' height='35' fill='%2310b981'/><line x1='54' y1='25' x2='54' y2='35' stroke='%2310b981' stroke-width='2'/><line x1='54' y1='70' x2='54' y2='85' stroke='%2310b981' stroke-width='2'/><rect x='70' y='15' width='8' height='45' fill='%2310b981'/><line x1='74' y1='5' x2='74' y2='15' stroke='%2310b981' stroke-width='2'/><line x1='74' y1='60' x2='74' y2='75' stroke='%2310b981' stroke-width='2'/><rect x='90' y='30' width='8' height='35' fill='%23ef4444'/><line x1='94' y1='20' x2='94' y2='30' stroke='%23ef4444' stroke-width='2'/><line x1='94' y1='65' x2='94' y2='80' stroke='%23ef4444' stroke-width='2'/><rect x='110' y='25' width='8' height='30' fill='%2310b981'/><line x1='114' y1='15' x2='114' y2='25' stroke='%2310b981' stroke-width='2'/><line x1='114' y1='55' x2='114' y2='70' stroke='%2310b981' stroke-width='2'/></g><circle cx='160' cy='160' r='25' fill='white' opacity='0.9'/><text x='160' y='170' text-anchor='middle' font-size='28' font-weight='bold' fill='%23667eea'>%2B</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><defs><linearGradient id='bg2' x1='0' y1='0' x2='1' y2='1'><stop offset='0%25' stop-color='%23667eea'/><stop offset='100%25' stop-color='%23764ba2'/></linearGradient></defs><rect width='512' height='512' fill='url(%23bg2)' rx='90'/><g transform='translate(80,130)'><rect x='25' y='100' width='22' height='80' fill='%2310b981'/><line x1='36' y1='80' x2='36' y2='100' stroke='%2310b981' stroke-width='5'/><line x1='36' y1='180' x2='36' y2='210' stroke='%2310b981' stroke-width='5'/><rect x='80' y='50' width='22' height='110' fill='%23ef4444'/><line x1='91' y1='25' x2='91' y2='50' stroke='%23ef4444' stroke-width='5'/><line x1='91' y1='160' x2='91' y2='190' stroke='%23ef4444' stroke-width='5'/><rect x='135' y='90' width='22' height='95' fill='%2310b981'/><line x1='146' y1='65' x2='146' y2='90' stroke='%2310b981' stroke-width='5'/><line x1='146' y1='185' x2='146' y2='220' stroke='%2310b981' stroke-width='5'/><rect x='190' y='40' width='22' height='120' fill='%2310b981'/><line x1='201' y1='15' x2='201' y2='40' stroke='%2310b981' stroke-width='5'/><line x1='201' y1='160' x2='201' y2='200' stroke='%2310b981' stroke-width='5'/><rect x='245' y='75' width='22' height='95' fill='%23ef4444'/><line x1='256' y1='50' x2='256' y2='75' stroke='%23ef4444' stroke-width='5'/><line x1='256' y1='170' x2='256' y2='210' stroke='%23ef4444' stroke-width='5'/><rect x='300' y='65' width='22' height='80' fill='%2310b981'/><line x1='311' y1='40' x2='311' y2='65' stroke='%2310b981' stroke-width='5'/><line x1='311' y1='145' x2='311' y2='185' stroke='%2310b981' stroke-width='5'/></g><circle cx='420' cy='420' r='65' fill='white' opacity='0.95'/><text x='420' y='450' text-anchor='middle' font-size='75' font-weight='bold' fill='%23667eea'>%2B</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1080 1920'><rect width='1080' height='1920' fill='%231e293b'/><text x='540' y='200' text-anchor='middle' font-size='60' fill='white'>Калькулятор Pro</text></svg>",
+      "sizes": "1080x1920",
+      "type": "image/svg+xml"
+    }
+  ]
+}
