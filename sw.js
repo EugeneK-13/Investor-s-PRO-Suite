@@ -1,9 +1,7 @@
 // sw.js — InvCalc Pro Suite v1.5
-// ─────────────────────────────────────────────────────────────────
 // HOW TO UPDATE: bump CACHE_NAME here AND APP_VERSION in invpro.html
 // to the same value on every deploy. Old caches auto-delete.
 // GitHub Pages base: /Investor-s-PRO-Suite/
-// ─────────────────────────────────────────────────────────────────
 
 const CACHE_NAME = 'invcalc-v1.5';
 const BASE = '/Investor-s-PRO-Suite/';
@@ -106,7 +104,7 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // ④ Everything else (manifest.json, favicon, etc.) — cache-first.
+  // ④ Everything else (manifest.json, icons, etc.) — cache-first.
   event.respondWith(
     caches.match(request)
       .then(cached => cached || fetch(request))
