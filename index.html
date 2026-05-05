@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -9,7 +9,9 @@
 <meta name="apple-mobile-web-app-title" content="InvCalc Pro">
 <title>InvCalc Pro Suite</title>
 <link rel="manifest" href="manifest.json">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>📊</text></svg>">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -19,7 +21,7 @@
 *{margin:0;padding:0;box-sizing:border-box}
 
 /* ===== APP SHELL ===== */
-body{font-family:'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif;background:#0a0e1a;color:#e2e8f0;min-height:100vh;display:flex;overflow-x:hidden}
+html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif;background:#0a0e1a;color:#e2e8f0;min-height:100vh;display:flex;overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch}
 .app-sidebar{width:220px;min-height:100vh;background:#0d1526;border-right:1px solid #1a2744;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:200;transition:width 0.25s ease;overflow:hidden}
 .app-sidebar.nav-collapsed{width:64px}
 .sidebar-logo{padding:16px 14px;border-bottom:1px solid #1a2744;display:flex;align-items:center;gap:10px;min-height:60px;flex-shrink:0;position:relative}
@@ -184,11 +186,11 @@ body{font-family:'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif;backgroun
 #page-stock .financials-section{margin-bottom:30px}
 #page-stock .info-label{font-size:.62rem;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;opacity:.7;display:block;margin-bottom:3px}
 #page-stock .company-info .info-item{min-width:100px}
-.install-banner{background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:#fff;padding:15px 20px;border-radius:12px;margin-bottom:24px;display:none;align-items:center;justify-content:space-between;gap:12px}
-.install-banner .install-text{font-weight:600;font-size:.95rem}
-.install-banner .install-sub{font-size:.8rem;opacity:.85;margin-top:2px}
-.install-btn{padding:10px 22px;background:#fff;color:#10b981;border:none;border-radius:8px;font-weight:700;cursor:pointer;white-space:nowrap;font-size:.9rem}
-.install-btn:hover{background:#f0fdf4}
+.install-banner{background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:#fff;padding:16px 20px;border-radius:14px;margin-bottom:28px;display:none;align-items:center;justify-content:space-between;gap:16px;box-shadow:0 4px 24px rgba(16,185,129,.25)}
+.install-banner-text .install-title{font-weight:700;font-size:.95rem;margin-bottom:2px}
+.install-banner-text .install-sub{font-size:.78rem;opacity:.85}
+.install-btn{flex-shrink:0;padding:10px 22px;background:#fff;color:#059669;border:none;border-radius:9px;font-weight:700;cursor:pointer;font-size:.88rem;white-space:nowrap}
+.install-btn:hover{background:#f0fdf4;transform:scale(1.03)}
 
 /* ===== POSITION MANAGER ===== */
 #page-position{
@@ -1058,9 +1060,9 @@ body{font-family:'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif;backgroun
 <!-- ████████████████ DASHBOARD ████████████████ -->
 <div id="page-dashboard" class="app-page page-active">
   <div class="install-banner" id="installBanner">
-    <div>
-      <div class="install-text">📱 Install InvCalc Pro Suite</div>
-      <div class="install-sub">Works offline · Saves to Home Screen · No app store needed</div>
+    <div class="install-banner-text">
+      <div class="install-title">📱 Install InvCalc Pro Suite</div>
+      <div class="install-sub">Add to Home Screen · Works offline · No app store needed</div>
     </div>
     <button class="install-btn" id="installBtn">Install App</button>
   </div>
@@ -3923,11 +3925,46 @@ function saShowNotification(text){const n=document.getElementById('saCopyNotif')
 function saFormatBigNumber(num){num=safeNum(num);if(!num)return'N/A';if(!num||num===0)return'N/A';const a=Math.abs(num);if(a>=1e12)return`$${(num/1e12).toFixed(2)}T`;if(a>=1e9)return`$${(num/1e9).toFixed(2)}B`;if(a>=1e6)return`$${(num/1e6).toFixed(2)}M`;if(a>=1e3)return`$${(num/1e3).toFixed(2)}K`;return`$${num.toLocaleString()}`;}
 function saFormatMarketCap(cap){cap=safeNum(cap);if(!cap)return'N/A';if(cap>=1e12)return`$${(cap/1e12).toFixed(2)}T`;if(cap>=1e9)return`$${(cap/1e9).toFixed(2)}B`;if(cap>=1e6)return`$${(cap/1e6).toFixed(2)}M`;return`$${cap.toFixed(0)}`;}
 
-// PWA
-let deferredPrompt;
-window.addEventListener('beforeinstallprompt',(e)=>{e.preventDefault();deferredPrompt=e;const b=document.getElementById('installBanner');if(b)b.style.display='flex';});
-const installBtn=document.getElementById('installBtn');
-if(installBtn)installBtn.addEventListener('click',async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();const{outcome}=await deferredPrompt.userChoice;deferredPrompt=null;const b=document.getElementById('installBanner');if(b)b.style.display='none';});
+// PWA — install prompt
+let deferredPrompt = null;
+
+// beforeinstallprompt fires ONCE (sometimes before DOMContentLoaded on fast connections).
+// We store it and show the banner whenever it arrives.
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  const b = document.getElementById('installBanner');
+  if (b) b.style.display = 'flex';
+});
+
+// If already installed, hide the banner
+window.addEventListener('appinstalled', () => {
+  deferredPrompt = null;
+  const b = document.getElementById('installBanner');
+  if (b) b.style.display = 'none';
+  console.log('[PWA] App installed successfully');
+});
+
+// Wire up the install button after DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  const installBtn = document.getElementById('installBtn');
+  if (installBtn) {
+    installBtn.addEventListener('click', async () => {
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      console.log('[PWA] Install outcome:', outcome);
+      deferredPrompt = null;
+      const b = document.getElementById('installBanner');
+      if (b) b.style.display = 'none';
+    });
+  }
+  // If prompt already fired before DOMContentLoaded, show banner now
+  if (deferredPrompt) {
+    const b = document.getElementById('installBanner');
+    if (b) b.style.display = 'flex';
+  }
+});
 // ── Service Worker registration ───────────────────────────────
 // Bump APP_VERSION AND CACHE_NAME in sw.js together on every deploy.
 // The version check below clears old caches immediately on load.
@@ -3936,7 +3973,7 @@ const APP_VERSION = '1.5';
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
-      const reg = await navigator.serviceWorker.register('/sw.js');
+      const reg = await navigator.serviceWorker.register('./sw.js');
 
       // A new SW found while page is open → tell it to skip waiting
       // so it activates without requiring the user to close all tabs.
