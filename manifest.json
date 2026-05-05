@@ -2,7 +2,7 @@
   "name": "InvCalc Pro Suite",
   "short_name": "InvCalc Pro",
   "description": "Professional investment analysis: Stock Analyzer, DCF, DCA, Fair Value, Options & more",
-  "start_url": "./invpro.html",
+  "start_url": "./index.html",
   "scope": "/Investor-s-PRO-Suite/",
   "display": "standalone",
   "background_color": "#0a0e1a",
@@ -10,25 +10,25 @@
   "orientation": "any",
   "icons": [
     {
-      "src": "icons/icon-192.png",
+      "src": "icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "icons/icon-192.png",
+      "src": "icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "maskable"
     },
     {
-      "src": "icons/icon-512.png",
+      "src": "icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "icons/icon-512.png",
+      "src": "icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
@@ -36,13 +36,13 @@
   ],
   "screenshots": [
     {
-      "src": "icons/icon-512.png",
+      "src": "icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "form_factor": "narrow"
     },
     {
-      "src": "icons/icon-512.png",
+      "src": "icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "form_factor": "wide"

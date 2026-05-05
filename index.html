@@ -9,9 +9,9 @@
 <meta name="apple-mobile-web-app-title" content="InvCalc Pro">
 <title>InvCalc Pro Suite</title>
 <link rel="manifest" href="manifest.json">
-<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
-<link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
-<link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -190,7 +190,7 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
 .install-banner-text .install-title{font-weight:700;font-size:.95rem;margin-bottom:2px}
 .install-banner-text .install-sub{font-size:.78rem;opacity:.85}
 .install-btn{flex-shrink:0;padding:10px 22px;background:#fff;color:#059669;border:none;border-radius:9px;font-weight:700;cursor:pointer;font-size:.88rem;white-space:nowrap}
-.install-btn:hover{background:#f0fdf4;transform:scale(1.03)}
+.install-btn:hover{background:#f0fdf4}
 
 /* ===== POSITION MANAGER ===== */
 #page-position{
@@ -3925,11 +3925,9 @@ function saShowNotification(text){const n=document.getElementById('saCopyNotif')
 function saFormatBigNumber(num){num=safeNum(num);if(!num)return'N/A';if(!num||num===0)return'N/A';const a=Math.abs(num);if(a>=1e12)return`$${(num/1e12).toFixed(2)}T`;if(a>=1e9)return`$${(num/1e9).toFixed(2)}B`;if(a>=1e6)return`$${(num/1e6).toFixed(2)}M`;if(a>=1e3)return`$${(num/1e3).toFixed(2)}K`;return`$${num.toLocaleString()}`;}
 function saFormatMarketCap(cap){cap=safeNum(cap);if(!cap)return'N/A';if(cap>=1e12)return`$${(cap/1e12).toFixed(2)}T`;if(cap>=1e9)return`$${(cap/1e9).toFixed(2)}B`;if(cap>=1e6)return`$${(cap/1e6).toFixed(2)}M`;return`$${cap.toFixed(0)}`;}
 
-// PWA — install prompt
+// PWA install prompt
 let deferredPrompt = null;
 
-// beforeinstallprompt fires ONCE (sometimes before DOMContentLoaded on fast connections).
-// We store it and show the banner whenever it arrives.
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
@@ -3937,29 +3935,24 @@ window.addEventListener('beforeinstallprompt', (e) => {
   if (b) b.style.display = 'flex';
 });
 
-// If already installed, hide the banner
 window.addEventListener('appinstalled', () => {
   deferredPrompt = null;
   const b = document.getElementById('installBanner');
   if (b) b.style.display = 'none';
-  console.log('[PWA] App installed successfully');
 });
 
-// Wire up the install button after DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
-  const installBtn = document.getElementById('installBtn');
-  if (installBtn) {
-    installBtn.addEventListener('click', async () => {
+  const btn = document.getElementById('installBtn');
+  if (btn) {
+    btn.addEventListener('click', async () => {
       if (!deferredPrompt) return;
       deferredPrompt.prompt();
       const { outcome } = await deferredPrompt.userChoice;
-      console.log('[PWA] Install outcome:', outcome);
       deferredPrompt = null;
       const b = document.getElementById('installBanner');
       if (b) b.style.display = 'none';
     });
   }
-  // If prompt already fired before DOMContentLoaded, show banner now
   if (deferredPrompt) {
     const b = document.getElementById('installBanner');
     if (b) b.style.display = 'flex';

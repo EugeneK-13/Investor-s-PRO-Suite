@@ -1,19 +1,18 @@
 // sw.js — InvCalc Pro Suite v1.5
-// HOW TO UPDATE: bump CACHE_NAME here AND APP_VERSION in invpro.html
-// to the same value on every deploy. Old caches auto-delete.
-// GitHub Pages base: /Investor-s-PRO-Suite/
+// GitHub Pages: https://eugenek-13.github.io/Investor-s-PRO-Suite/
+// HOW TO UPDATE: bump CACHE_NAME here AND APP_VERSION in index.html together.
 
 const CACHE_NAME = 'invcalc-v1.5';
 const BASE = '/Investor-s-PRO-Suite/';
 
 const PRECACHE_ASSETS = [
-  BASE + 'invpro.html',
+  BASE + 'index.html',
   BASE + 'manifest.json',
-  BASE + 'icons/icon-192.png',
-  BASE + 'icons/icon-512.png',
-  BASE + 'icons/apple-touch-icon.png',
-  BASE + 'icons/favicon-32.png',
-  BASE + 'icons/favicon-16.png',
+  BASE + 'icon-192.png',
+  BASE + 'icon-512.png',
+  BASE + 'apple-touch-icon.png',
+  BASE + 'favicon-32.png',
+  BASE + 'favicon-16.png',
 ];
 
 // ── INSTALL ───────────────────────────────────────────────────────
@@ -37,76 +36,68 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys()
-      .then(names => {
-        const old = names.filter(n => n !== CACHE_NAME);
-        if (old.length) console.log('[SW] Removing old caches:', old);
-        return Promise.all(old.map(n => caches.delete(n)));
-      })
+      .then(names => Promise.all(
+        names.filter(n => n !== CACHE_NAME).map(n => caches.delete(n))
+      ))
       .then(() => self.clients.claim())
   );
 });
 
 // ── MESSAGE ───────────────────────────────────────────────────────
 self.addEventListener('message', event => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 // ── FETCH ─────────────────────────────────────────────────────────
 self.addEventListener('fetch', event => {
-  const { request } = event;
-  const url = new URL(request.url);
+  const url = new URL(event.request.url);
 
-  // ① Finnhub API — NEVER cache. Financial data must always be live.
+  // ① Finnhub — never cache
   if (url.hostname === 'finnhub.io') {
-    event.respondWith(fetch(request));
+    event.respondWith(fetch(event.request));
     return;
   }
 
-  // ② Google Fonts / CDN (Chart.js, jsPDF, SheetJS) — cache-first.
+  // ② CDN (Chart.js, jsPDF, SheetJS, Google Fonts) — cache-first
   if (
     url.hostname.includes('fonts.googleapis.com') ||
-    url.hostname.includes('fonts.gstatic.com')    ||
+    url.hostname.includes('fonts.gstatic.com') ||
     url.hostname.includes('cdnjs.cloudflare.com') ||
     url.hostname.includes('cdn.jsdelivr.net')
   ) {
     event.respondWith(
       caches.open(CACHE_NAME).then(cache =>
-        cache.match(request).then(cached => {
+        cache.match(event.request).then(cached => {
           if (cached) return cached;
-          return fetch(request).then(res => {
-            if (res.ok) cache.put(request, res.clone());
+          return fetch(event.request).then(res => {
+            if (res.ok) cache.put(event.request, res.clone());
             return res;
-          }).catch(() => cached);
+          });
         })
       )
     );
     return;
   }
 
-  // ③ Main app (invpro.html) — NETWORK-FIRST.
-  if (url.pathname === BASE + 'invpro.html' || url.pathname === BASE) {
+  // ③ Main app (index.html) — network-first, cache fallback
+  if (url.pathname === BASE + 'index.html' || url.pathname === BASE) {
     event.respondWith(
-      fetch(request)
+      fetch(event.request)
         .then(res => {
           if (res.ok) {
             caches.open(CACHE_NAME)
-              .then(cache => cache.put(BASE + 'invpro.html', res.clone()));
+              .then(cache => cache.put(BASE + 'index.html', res.clone()));
           }
           return res;
         })
-        .catch(() =>
-          caches.match(BASE + 'invpro.html')
-            .then(c => c || caches.match(BASE))
-        )
+        .catch(() => caches.match(BASE + 'index.html'))
     );
     return;
   }
 
-  // ④ Everything else (manifest.json, icons, etc.) — cache-first.
+  // ④ Everything else — cache-first
   event.respondWith(
-    caches.match(request)
-      .then(cached => cached || fetch(request))
+    caches.match(event.request)
+      .then(cached => cached || fetch(event.request))
   );
 });
