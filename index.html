@@ -1798,6 +1798,7 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
               <div class="fv-form-group"><label>Earnings Growth (%)</label><input type="number" id="fv_c_growth" value="12" step="0.5"></div>
               <div class="fv-form-group"><label>WACC (%)</label><input type="number" id="fv_c_wacc" value="9" step="0.5"></div>
               <div class="fv-form-group"><label>Sector P/E</label><input type="number" id="fv_c_spe" value="30" step="0.5"></div>
+              <div class="fv-form-group"><label>AAA Bond Yield (%)</label><input type="number" id="fv_c_yield" value="4.5" step="0.1"><small>Used only for the Graham method below — not the same rate as WACC</small></div>
             </div>
           </div>
           <button class="fv-calc-btn" onclick="fvCalculateCombined()">Run Combined Analysis</button>
@@ -1856,7 +1857,7 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
             </div>
             <div class="dca-form-group" style="margin-top:20px"><label>Investment Period (years)</label><input type="number" id="dca_years" value="10" min="1" max="40" step="1"></div>
             <div class="dca-form-group"><label>Expected Annual Return (%)</label><input type="number" id="dca_return" value="10" min="-50" max="100" step="0.5"></div>
-            <div class="dca-form-group"><label>Volatility — σ (%)</label><input type="number" id="dca_vol" value="15" min="0" max="100" step="1"></div>
+            <div class="dca-form-group"><label>Volatility — σ (%)</label><input type="number" id="dca_vol" value="15" min="0" max="100" step="1"><small style="display:block;margin-top:4px;color:var(--dca-text3,#64748b);font-size:.75rem">Adds random monthly noise (Monte Carlo-style) — results will vary slightly on each recalculation. Set to 0 for a fully deterministic projection.</small></div>
             <div class="dca-form-group"><label>Starting Asset Price ($)</label><input type="number" id="dca_init_price" value="100" min="0.01" step="0.01"></div>
             <button class="dca-calc-btn" onclick="dcaCalculate()">🚀 Calculate Strategy</button>
           </div>
@@ -1867,6 +1868,7 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
               <div style="color:var(--dca-text2)">Configure settings and click<br><strong>Calculate Strategy</strong></div>
             </div>
             <div id="dca_results" style="display:none">
+              <div id="dca_r_vol_note" style="margin-bottom:12px;padding:8px 12px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25);border-radius:8px;color:#fbbf24;font-size:.75rem;line-height:1.5;display:none">🎲 This projection includes random price noise (volatility &gt; 0) — re-running the calculation with the same inputs will give a slightly different result each time. Treat it as one simulated path, not a precise forecast.</div>
               <div class="dca-result-box visible">
                 <div class="dca-result-title">📊 Summary Results</div>
                 <div class="dca-result-grid">
@@ -2018,6 +2020,20 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
 function safeNum(val, fallback = 0) {
   const n = parseFloat(val);
   return (isFinite(n) && !isNaN(n)) ? n : fallback;
+}
+
+// Escape text before inserting it into innerHTML. Use this for any string
+// that came from the user (typed input, an imported backup file) or from
+// Finnhub (ticker/company name) — none of it is trusted, and this app
+// renders a lot of it directly into innerHTML across every tool.
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // Show a styled inline error inside any container element
@@ -3450,8 +3466,8 @@ function saRenderWatchlistItems() {
                    : '#e2e8f0';
     return `<div class="watchlist-item">
       <div style="flex:1;cursor:pointer" onclick="saCloseModal('saWatchlistModal');saQuickLoad('${item.symbol}')">
-        <strong style="font-family:'DM Mono',monospace">${item.symbol}</strong>
-        <span style="color:#64748b;font-size:.82rem"> — ${item.name}</span><br>
+        <strong style="font-family:'DM Mono',monospace">${escapeHtml(item.symbol)}</strong>
+        <span style="color:#64748b;font-size:.82rem"> — ${escapeHtml(item.name)}</span><br>
         <span style="color:${priceClr};font-weight:700;font-family:'DM Mono',monospace">$${safeNum(item.price).toFixed(2)}</span>
         ${changeStr}
         <span style="color:#475569;font-size:.7rem;margin-left:8px">${item.refreshedAt ? 'updated ' + new Date(item.refreshedAt).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : 'saved ' + new Date(item.addedAt).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>
@@ -3512,9 +3528,9 @@ function saRemoveFromWatchlist(sym) {
   saUpdateCounts();
   saRenderWatchlistItems();
 }
-function openHistory(){const c=saHistory.length?saHistory.map(i=>`<div class="watchlist-item" onclick="saCloseModal('saHistoryModal');saQuickLoad('${i.symbol}')"><strong>${i.symbol}</strong> — ${i.name}<br><small>${new Date(i.analyzedAt).toLocaleString('en-US')}</small></div>`).join(''):'<div class="empty-state">Empty</div>';document.getElementById('saHistoryContent').innerHTML=c;document.getElementById('saHistoryModal').style.display='block';}
+function openHistory(){const c=saHistory.length?saHistory.map(i=>`<div class="watchlist-item" onclick="saCloseModal('saHistoryModal');saQuickLoad('${i.symbol}')"><strong>${escapeHtml(i.symbol)}</strong> — ${escapeHtml(i.name)}<br><small>${new Date(i.analyzedAt).toLocaleString('en-US')}</small></div>`).join(''):'<div class="empty-state">Empty</div>';document.getElementById('saHistoryContent').innerHTML=c;document.getElementById('saHistoryModal').style.display='block';}
 function saCreateAlert(){const t=document.getElementById('saAlertTicker').value.trim().toUpperCase(),p=parseFloat(document.getElementById('saAlertPrice').value),tp=document.getElementById('saAlertType').value;if(!t||!p)return alert('Please fill in all fields!');saAlerts.push({ticker:t,price:p,type:tp,createdAt:new Date().toISOString()});localStorage.setItem('alerts',JSON.stringify(saAlerts));saUpdateCounts();saRenderAlerts();saShowNotification('🔔 Alert created!');document.getElementById('saAlertTicker').value='';document.getElementById('saAlertPrice').value='';}
-function saRenderAlerts(){document.getElementById('saAlertsContent').innerHTML=saAlerts.length?saAlerts.map((a,i)=>`<div class="watchlist-item"><div><strong>${a.ticker}</strong> ${a.type==='above'?'>':'<'} $${a.price.toFixed(2)}<br><small>${new Date(a.createdAt).toLocaleDateString('en-US')}</small></div><button class="delete-btn" onclick="saRemoveAlert(${i})">🗑️</button></div>`).join(''):'<div class="empty-state">No alerts set</div>';}
+function saRenderAlerts(){document.getElementById('saAlertsContent').innerHTML=saAlerts.length?saAlerts.map((a,i)=>`<div class="watchlist-item"><div><strong>${escapeHtml(a.ticker)}</strong> ${a.type==='above'?'>':'<'} $${a.price.toFixed(2)}<br><small>${new Date(a.createdAt).toLocaleDateString('en-US')}</small></div><button class="delete-btn" onclick="saRemoveAlert(${i})">🗑️</button></div>`).join(''):'<div class="empty-state">No alerts set</div>';}
 function saRemoveAlert(i){saAlerts.splice(i,1);localStorage.setItem('alerts',JSON.stringify(saAlerts));saUpdateCounts();saRenderAlerts();}
 function openAlerts(){saRenderAlerts();document.getElementById('saAlertsModal').style.display='block';}
 function saCheckAlerts(){if(!saCurrentData)return;saAlerts.filter(a=>a.ticker===saCurrentData.symbol).forEach(a=>{if(a.type==='above'&&saCurrentData.price>=a.price)saShowNotification(`🔔 ${a.ticker} reached $${a.price}!`);else if(a.type==='below'&&saCurrentData.price<=a.price)saShowNotification(`🔔 ${a.ticker} dropped to $${a.price}!`);});}
@@ -3560,7 +3576,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Service Worker registration ───────────────────────────────
 // Bump APP_VERSION AND CACHE_NAME in sw.js together on every deploy.
 // The version check below clears old caches immediately on load.
-const APP_VERSION = '1.7';
+const APP_VERSION = '1.7.2';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
@@ -3827,7 +3843,7 @@ function pmRenderPortfolio(){
   document.getElementById('pm_p_list').innerHTML=pmPortfolio.map((p,i)=>{
     const pnl=(p.c-p.b)*p.s, ret=(p.c-p.b)/p.b*100, w=p.c*p.s/tv*100;
     return `<div class="pos-item">
-      <div><div class="pos-ticker">${p.t}</div><div class="pos-name">${p.n} · ${p.s} shares</div></div>
+      <div><div class="pos-ticker">${escapeHtml(p.t)}</div><div class="pos-name">${escapeHtml(p.n)} · ${p.s} shares</div></div>
       <div style="flex:1;padding:0 14px"><div style="font-size:.76rem;color:var(--pm-text3)">$${pmFmt(p.b)} → $${pmFmt(p.c)} · ${pmFmt(w,1)}% of portfolio</div>
       <div style="margin-top:5px"><div class="progress-track"><div class="progress-fill" style="width:${Math.min(Math.max(w,2),100)}%;background:${w>10?'var(--pm-yellow)':w>5?'var(--pm-accent)':'var(--pm-green)'}"></div></div></div></div>
       <div class="pos-pnl"><div class="pv ${pmCC(pnl)}">${pnl>=0?'+':'-'}$${pmFmt(Math.abs(pnl))}</div><div style="font-size:.75rem;color:${ret>=0?'var(--pm-green)':'var(--pm-red)'}">${pmFmtP(ret)}</div></div>
@@ -3873,7 +3889,7 @@ function pmBuildQuickLoadChips(){
     if(!bar||!chips)return;
     if(!pmPortfolio.length){bar.style.display='none';return;}
     bar.style.display='flex';
-    chips.innerHTML=pmPortfolio.map((p,i)=>`<span class="ql-chip" onclick="pmLoadFromPortfolio(${i},'${dest}')">${p.t} $${pmFmt(p.c,0)}</span>`).join('');
+    chips.innerHTML=pmPortfolio.map((p,i)=>`<span class="ql-chip" onclick="pmLoadFromPortfolio(${i},'${dest}')">${escapeHtml(p.t)} $${pmFmt(p.c,0)}</span>`).join('');
   });
 }
 
@@ -3885,14 +3901,14 @@ function pmAnalyzePosition(){
   const shares=parseFloat(document.getElementById('pm_a_shares').value);
   const horizon=parseInt(document.getElementById('pm_a_horizon').value);
   const eps=parseFloat(document.getElementById('pm_a_eps').value);
-  const growth=parseFloat(document.getElementById('pm_a_growth').value);
-  const target=parseFloat(document.getElementById('pm_a_target').value);
-  const h52=parseFloat(document.getElementById('pm_a_52h').value);
-  const l52=parseFloat(document.getElementById('pm_a_52l').value);
-  const stop=parseFloat(document.getElementById('pm_a_stop').value);
-  const tp=parseFloat(document.getElementById('pm_a_tp').value);
-  const beta=parseFloat(document.getElementById('pm_a_beta').value);
-  const quality=parseFloat(document.getElementById('pm_a_quality').value);
+  const growthRaw=parseFloat(document.getElementById('pm_a_growth').value);
+  const targetRaw=parseFloat(document.getElementById('pm_a_target').value);
+  const h52Raw=parseFloat(document.getElementById('pm_a_52h').value);
+  const l52Raw=parseFloat(document.getElementById('pm_a_52l').value);
+  const stopRaw=parseFloat(document.getElementById('pm_a_stop').value);
+  const tpRaw=parseFloat(document.getElementById('pm_a_tp').value);
+  const betaRaw=parseFloat(document.getElementById('pm_a_beta').value);
+  const qualityRaw=parseFloat(document.getElementById('pm_a_quality').value);
   const thesis=document.getElementById('pm_a_thesis').value;
   // ── Input validation with field highlighting ─────────────────
   const pmAValid = validateFields([
@@ -3902,6 +3918,25 @@ function pmAnalyzePosition(){
     ['pm_a_eps',     eps     > 0 && isFinite(eps),      'Required — enter positive EPS (TTM)'],
   ]);
   if (!pmAValid) return;
+
+  // The remaining fields are optional in the form, but a blank/invalid one
+  // (parseFloat('') = NaN) would otherwise poison every downstream ratio and
+  // silently flip the buy/hold/sell signal without any visible error. Fall
+  // back to neutral defaults instead, and tell the user which ones were used.
+  const defaultsUsed = [];
+  const withDefault = (val, fallback, label) => {
+    if (isFinite(val)) return val;
+    defaultsUsed.push(label);
+    return fallback;
+  };
+  const growth  = withDefault(growthRaw, 0,        'EPS Growth → 0%');
+  const target  = withDefault(targetRaw, current,  'Analyst target → current price');
+  const h52     = withDefault(h52Raw,    current,  '52-week high → current price');
+  const l52     = withDefault(l52Raw,    current,  '52-week low → current price');
+  const stop    = withDefault(stopRaw,   0,        'Stop-loss → none set');
+  const tp      = withDefault(tpRaw,     current,  'Take-profit → current price');
+  const beta    = withDefault(betaRaw,   1,        'Beta → 1.0 (market average)');
+  const quality = withDefault(qualityRaw, 5,       'Business quality → 5/10 (neutral)');
 
   const pnlAbs=(current-buy)*shares,pnlPct=buy>0?(current-buy)/buy*100:0,posValue=current*shares,costBasis=buy*shares;
   const pe=current/eps,peg=pe/Math.max(growth,0.1),toTarget=(target-current)/current*100,toStop=(current-stop)/current*100;
@@ -3943,7 +3978,11 @@ function pmAnalyzePosition(){
   else{mainSignal='HOLD &amp; MONITOR';sCls='hold';vCls='hold-v';}
   const rHTML=reasons.map(r=>`<div class="reason-item"><div class="ri ${r.t==='ok'?'ok':r.t==='warn'?'warn':'bad'}">${r.t==='ok'?'✓':'!'}</div><span>${r.msg}</span></div>`).join('');
   const hCards=[.25,.5,1,2,3].map(y=>{const fE=eps*Math.pow(1+growth/100,y),fV=fE*fairPE,rr2=(fV-current)/current*100;return`<div class="metric ${rr2>10?'green':rr2<0?'red':'yellow'}"><div class="metric-label">${y<1?y*12+' mo':y+'yr'+(y>1?'s':'')}</div><div class="metric-value ${rr2>0?'pos':'neg'}">${pmFmtP(rr2)}</div><div class="metric-sub">$${pmFmt(fV,0)}<br>EPS $${pmFmt(fE,2)}</div></div>`;}).join('');
+  const defaultsWarning = defaultsUsed.length
+    ? `<div style="margin-bottom:14px;padding:10px 14px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);border-radius:8px;color:#fbbf24;font-size:.8rem;line-height:1.6">⚠️ Empty fields defaulted: ${defaultsUsed.join(' · ')} — the signal below may be less reliable until these are filled in.</div>`
+    : '';
   document.getElementById('pm_a_results').innerHTML=`
+${defaultsWarning}
 <div class="verdict ${vCls}">
   <div class="verdict-head"><div class="signal ${sCls}"><div class="signal-dot"></div>${mainSignal}</div></div>
   <div class="verdict-body">${buy_s} bullish · ${hold} neutral · ${sell} bearish signals</div>
@@ -4070,7 +4109,7 @@ function pmRenderJournal(){
   el.innerHTML=pmJournal.map((e,i)=>{
     const sc=e.signal&&e.signal.includes('BUY')?'buy':e.signal&&e.signal.includes('SELL')?'sell':'hold';
     const cells=Object.entries(e.metrics||{}).map(([k,v])=>`<div class="je-cell"><div class="jk">${k}</div><div class="jv">${v}</div></div>`).join('');
-    return `<div class="journal-entry"><div class="je-header"><div class="je-ticker">${e.ticker||'—'}</div><div class="je-type">${e.type||'analysis'}</div><div class="je-date">${e.date}</div>${e.signal?`<div class="je-signal"><div class="signal ${sc}"><div class="signal-dot"></div>${e.signal}</div></div>`:''}<button class="pm-btn pm-btn-danger pm-btn-sm" style="margin-left:auto" onclick="pmDeleteJournal(${i})">✕</button></div><div class="je-body">${cells}</div><div class="je-notes"><textarea placeholder="Add notes..." onchange="pmUpdateJournalNote(${i},this.value)">${e.notes||''}</textarea></div></div>`;
+    return `<div class="journal-entry"><div class="je-header"><div class="je-ticker">${escapeHtml(e.ticker)||'—'}</div><div class="je-type">${escapeHtml(e.type)||'analysis'}</div><div class="je-date">${escapeHtml(e.date)}</div>${e.signal?`<div class="je-signal"><div class="signal ${sc}"><div class="signal-dot"></div>${escapeHtml(e.signal)}</div></div>`:''}<button class="pm-btn pm-btn-danger pm-btn-sm" style="margin-left:auto" onclick="pmDeleteJournal(${i})">✕</button></div><div class="je-body">${cells}</div><div class="je-notes"><textarea placeholder="Add notes..." onchange="pmUpdateJournalNote(${i},this.value)">${escapeHtml(e.notes||'')}</textarea></div></div>`;
   }).join('');
 
   }
@@ -4782,18 +4821,29 @@ function fvCalculateCombined() {
   const growth=parseFloat(document.getElementById('fv_c_growth').value);
   const wacc=parseFloat(document.getElementById('fv_c_wacc').value)/100;
   const spe=parseFloat(document.getElementById('fv_c_spe').value);
-  // DCF simple
-  let dcfTotal=0,f=fcf;
-  const gr=Math.min(growth/100,0.25);
-  for(let i=1;i<=10;i++){f*=(1+gr*(i<=5?1:0.5));dcfTotal+=f/Math.pow(1+wacc,i);}
-  dcfTotal+=(f*1.03)/(wacc-0.03)/Math.pow(1+wacc,10);
-  const dcfPerShare=dcfTotal/shares;
+  const bondYield=parseFloat(document.getElementById('fv_c_yield').value);
+  if (!validateFields([
+    ['fv_c_yield', bondYield > 0 && isFinite(bondYield), 'Required — enter AAA bond yield (%) for the Graham method'],
+  ])) return;
+  // DCF simple — guard against terminal growth (3%) meeting or exceeding WACC
+  let dcfPerShare = 0;
+  if (wacc > 0.03) {
+    let dcfTotal=0,f=fcf;
+    const gr=Math.min(growth/100,0.25);
+    for(let i=1;i<=10;i++){f*=(1+gr*(i<=5?1:0.5));dcfTotal+=f/Math.pow(1+wacc,i);}
+    dcfTotal+=(f*1.03)/(wacc-0.03)/Math.pow(1+wacc,10);
+    dcfPerShare = dcfTotal/shares;
+  }
   // PE
   const peVal=eps*spe;
-  // DDM
-  const ddmVal=div>0?((div*(1+growth/100/2))/(wacc-growth/100*0.5)):0;
-  // Graham
-  const grahamVal=eps*(8.5+2*growth/2)*(4.4/(wacc*100));
+  // DDM — Gordon model with the full growth rate (not arbitrarily halved),
+  // guarded against WACC being at or below the growth rate.
+  const ddmGrowth = growth/100;
+  const ddmVal = (div>0 && wacc>ddmGrowth) ? (div*(1+ddmGrowth))/(wacc-ddmGrowth) : 0;
+  // Graham — uses the AAA bond yield entered above (Y in the classic
+  // formula), NOT WACC: these are different rates, and substituting WACC
+  // here (as this function previously did) understates the Graham value.
+  const grahamVal=eps*(8.5+2*growth)*(4.4/bondYield);
   const validVals=[{v:dcfPerShare,w:1.5},{v:peVal,w:1.2},{v:ddmVal>0?ddmVal:null,w:1.0},{v:grahamVal,w:1.0}].filter(x=>x.v&&x.v>0&&x.v<price*5);
   const tw=validVals.reduce((a,x)=>a+x.w,0);
   const weighted=validVals.reduce((a,x)=>a+x.v*x.w,0)/tw;
@@ -4871,6 +4921,7 @@ function dcaCalculate() {
   if (!validateFields([
     ['dca_years',      totalYears  >= 1 && totalYears <= 40, 'Enter a period between 1 and 40 years'],
     ['dca_return',     isFinite(annualReturn),                'Enter expected annual return (%)'],
+    ['dca_vol',        isFinite(vol) && vol >= 0,             'Enter volatility (%), 0 or greater'],
     ['dca_init_price', initPrice   > 0 && isFinite(initPrice),'Required — enter starting asset price'],
   ])) return;
   const autoInc=document.getElementById('dca_auto_inc').checked;
@@ -4914,6 +4965,8 @@ function dcaCalculate() {
   // Show results div FIRST so all child elements are accessible
   document.getElementById('dca_placeholder').style.display='none';
   document.getElementById('dca_results').style.display='block';
+  const volNoteEl = document.getElementById('dca_r_vol_note');
+  if (volNoteEl) volNoteEl.style.display = vol > 0 ? 'block' : 'none';
 
   // Set result values (safe assignment with null checks)
   const dcaSet = (id, val) => { const el=document.getElementById(id); if(el) el.textContent=val; };
@@ -5308,16 +5361,18 @@ function dcfCalculateConservative() {
   const years=parseInt(document.getElementById('dcf_c_years').value);
   const shares=parseFloat(document.getElementById('dcf_c_shares').value);
   if (!validateFields([
-    ['dcf_c_fcf',    fcf    > 0 && isFinite(fcf),    'Required — enter current FCF ($M)'],
-    ['dcf_c_shares', shares > 0 && isFinite(shares), 'Required — enter shares outstanding (M)'],
-    ['dcf_c_wacc',   wacc   > 0 && wacc < 1,         'WACC must be between 0% and 100%'],
-    ['dcf_c_years',  years  >= 3 && years <= 15,     'Forecast period must be 3–15 years'],
+    ['dcf_c_fcf',      fcf      > 0 && isFinite(fcf),      'Required — enter current FCF ($M)'],
+    ['dcf_c_shares',   shares   > 0 && isFinite(shares),   'Required — enter shares outstanding (M)'],
+    ['dcf_c_wacc',     wacc     > 0 && wacc < 1,           'WACC must be between 0% and 100%'],
+    ['dcf_c_years',    years    >= 3 && years <= 15,       'Forecast period must be 3–15 years'],
+    ['dcf_c_growth',   isFinite(growth),                   'Required — enter FCF growth rate (%)'],
+    ['dcf_c_terminal', isFinite(terminal),                 'Required — enter terminal growth rate (%)'],
   ])) return;
   if (wacc <= terminal) {
     validateField('dcf_c_terminal', false, 'Terminal growth must be less than WACC');
     return;
   }
-  const name=document.getElementById('dcf_c_name').value;
+  const name=escapeHtml(document.getElementById('dcf_c_name').value);
   let pvCF=0,f=fcf;
   const schedule=[];
   for(let y=1;y<=years;y++){f*=(1+growth);const pv=f/Math.pow(1+wacc,y);pvCF+=pv;schedule.push({y,fcf:f,pv});}
@@ -5376,16 +5431,19 @@ function dcfCalculateEnhanced() {
   const years=parseInt(document.getElementById('dcf_e_years').value);
   const shares=parseFloat(document.getElementById('dcf_e_shares').value);
   if (!validateFields([
-    ['dcf_e_fcf',    fcf     > 0 && isFinite(fcf),    'Required — enter current FCF ($M)'],
-    ['dcf_e_shares', shares  > 0 && isFinite(shares),  'Required — enter shares outstanding (M)'],
-    ['dcf_e_wacc',   wacc    > 0 && wacc < 1,          'WACC must be between 0% and 100%'],
-    ['dcf_e_mult',   mult    >= 1 && mult <= 3,         'Platform multiplier must be 1–3×'],
+    ['dcf_e_fcf',      fcf      > 0 && isFinite(fcf),      'Required — enter current FCF ($M)'],
+    ['dcf_e_shares',   shares   > 0 && isFinite(shares),   'Required — enter shares outstanding (M)'],
+    ['dcf_e_wacc',     wacc     > 0 && wacc < 1,           'WACC must be between 0% and 100%'],
+    ['dcf_e_mult',     mult     >= 1 && mult <= 3,         'Platform multiplier must be 1–3×'],
+    ['dcf_e_growth',   isFinite(growth),                   'Required — enter FCF growth rate (%)'],
+    ['dcf_e_network',  isFinite(network),                  'Required — enter network effect (%)'],
+    ['dcf_e_terminal', isFinite(terminal),                 'Required — enter terminal growth rate (%)'],
   ])) return;
   if (wacc <= terminal) {
     validateField('dcf_e_terminal', false, 'Terminal growth must be less than WACC');
     return;
   }
-  const name=document.getElementById('dcf_e_name').value;
+  const name=escapeHtml(document.getElementById('dcf_e_name').value);
   const enhancedGrowth=growth*(1+network)*mult;
   let pvCF=0,f=fcf;
   const scheduleE=[];
