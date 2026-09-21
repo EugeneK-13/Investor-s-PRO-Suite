@@ -2557,13 +2557,14 @@ let saAlerts    = JSON.parse(localStorage.getItem('alerts')    || '[]');
 let saCurrentTooltip = null;
 
 const SA_METHOD_TOOLTIPS = {
-  graham:   { title:'Graham Number',     formula:'√(22.5 × EPS × Book Value)', desc:'Conservative estimate by Benjamin Graham' },
-  pe:       { title:'P/E Valuation',     formula:'EPS × P/E Multiple',         desc:'Earnings-based valuation. P/E varies by sector' },
-  peg:      { title:'PEG Ratio',         formula:'Price / (P/E / Growth)',      desc:'P/E adjusted for growth. Fair PEG = 1.0' },
-  dcf:      { title:'DCF (5 Years)',     formula:'Σ(FCF/(1+WACC)^t)+Terminal', desc:'Discounted cash flows. WACC=10%' },
-  ddm:      { title:'Dividend Discount', formula:'D×(1+g)/(r-g)',              desc:"Gordon Model for dividend stocks" },
-  evEbitda: { title:'EV/EBITDA',         formula:'Price × (Sector/Current)',   desc:'Comparison with sector multiple' },
-  ps:       { title:'Price/Sales',       formula:'Revenue × Target P/S',       desc:'Revenue-based valuation' }
+  graham:    { title:'Graham Number',     formula:'√(22.5 × EPS × Book Value)', desc:'Conservative estimate by Benjamin Graham. Uses normalized EPS if TTM EPS is negative.' },
+  pe:        { title:'P/E Valuation',     formula:'EPS × P/E Multiple',         desc:'Earnings-based valuation. P/E varies by sector' },
+  forwardPe: { title:'Forward P/E',       formula:'(Price/Fwd P/E) × Sector Mult', desc:'Uses forward EPS estimates — often unavailable on free data plans' },
+  peg:       { title:'PEG Ratio',         formula:'Price / (P/E / Growth, capped at 30%)', desc:'P/E adjusted for growth. Growth is capped so hyper-growth TTM figures don\'t distort it' },
+  dcf:       { title:'DCF (5yr, 2-stage)',formula:'Σ(FCF/(1+WACC)^t)+Terminal', desc:'WACC estimated via CAPM (risk-free + β×premium). Growth tapers to 3% terminal over 5 years.' },
+  ddm:       { title:'Dividend Discount', formula:'D×(1+g)/(r-g)',              desc:"Gordon Model for dividend stocks. Needs an actual dividend." },
+  evEbitda:  { title:'EV/EBITDA',         formula:'Price × (Sector/Current)',   desc:'Falls back to a self-computed EV/EBITDA when Finnhub has no direct ratio' },
+  ps:        { title:'Price/Sales',       formula:'Revenue × Target P/S',       desc:'Revenue-based valuation' }
 };
 
 function saShowMethodTooltip(method) {
@@ -2637,15 +2638,22 @@ async function saLoadStock() {
       marketCap:            safeNum(profile.marketCapitalization) * 1e6,
       // Valuation
       pe:                   safeNum(m['peNormalizedAnnual']        || m['peTTM']),
+      forwardPE:            safeNum(m['forwardPE']                 || m['peForward']),
       pb:                   safeNum(m['pbAnnual']                  || m['pbQuarterly']),
       priceToSales:         safeNum(m['psTTM']                     || m['psAnnual']),
       evToEbitda:           safeNum(m['ev/ebitdaTTM']              || m['ev/ebitdaAnnual']),
+      enterpriseValue:      safeNum(m['enterpriseValue']) * 1e6,
       // Per-share
       eps:                  safeNum(m['epsTTM']                    || m['epsAnnual']),
+      epsNormalized:        safeNum(m['epsNormalizedAnnual']),
       bookValue:            safeNum(m['bookValuePerShareAnnual']   || m['bookValuePerShareQuarterly']),
       revenuePerShare:      safeNum(m['revenuePerShareTTM']        || m['revenuePerShareAnnual']),
       freeCashFlowPerShare: safeNum(m['freeCashFlowPerShareTTM']   || m['freeCashFlowPerShareAnnual']),
+      ebitdaPerShare:       safeNum(m['ebitdPerShareTTM']          || m['ebitdPerShareAnnual']),
       dividendPerShare:     safeNum(m['dividendsPerShareAnnual']   || m['dividendsPerShareTTM']),
+      dividendYield:        safeNum(m['currentDividendYieldTTM']),
+      sharesOutstanding:    safeNum(profile.shareOutstanding) * 1e6,
+      beta:                 safeNum(m['beta'], 1),
       // Ratios / margins
       roe:                  safeNum(m['roeTTM']                    || m['roeAnnual']),
       roa:                  safeNum(m['roaTTM']                    || m['roaAnnual']),
@@ -2943,29 +2951,55 @@ function saRenderOverview(data) {
   }
 }
 
+function saMethodCell(val, valueKey, reasonKey) {
+  const v = val[valueKey];
+  if (v > 0) return `<span>$${v.toFixed(2)}</span>`;
+  const reason = val.reasons && val.reasons[reasonKey];
+  return reason
+    ? `<span style="color:#64748b;font-size:.82em;font-weight:400" title="${reason}">Excluded — ${reason}</span>`
+    : `<span>N/A</span>`;
+}
+
 function saRenderValuation(data) {
   try {
   const val = saCalculateValuation(data);
   let cardClass = 'valuation-card', rec = '🔴 SELL';
   if (val.potential > 20) { cardClass += ' undervalued'; rec = '🟢 BUY'; }
   else if (val.potential > 0) { cardClass += ' hold'; rec = '🟡 HOLD'; }
+
+  const profileBadge = `<span style="display:inline-block;margin-left:8px;padding:2px 9px;border-radius:20px;font-size:.72em;font-weight:700;background:rgba(255,255,255,.18)">${val.profile} profile</span>`;
+
+  const dispersionHtml = val.dispersion && val.dispersion.high
+    ? `<div style="margin-top:10px;padding:8px 12px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);border-radius:8px;color:#fbbf24;font-size:.78em">⚠️ High spread between methods (${val.dispersion.ratio.toFixed(1)}× between min $${val.dispersion.min.toFixed(2)} and max $${val.dispersion.max.toFixed(2)}) — treat the weighted average with caution.</div>`
+    : '';
+
+  const reverseDcfHtml = (val.impliedGrowth !== null && isFinite(val.impliedGrowth))
+    ? `<div style="margin-top:14px;padding:12px 14px;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.25);border-radius:10px">
+        <div style="font-weight:700;font-size:.85em;margin-bottom:4px;color:#93c5fd">🔄 Reverse DCF</div>
+        <div style="font-size:.82em;color:#cbd5e1;line-height:1.6">At the current price, the market is pricing in <strong>${(val.impliedGrowth*100).toFixed(1)}%</strong> annual FCF growth (WACC ${(val.wacc*100).toFixed(1)}%, 3% terminal growth). Compare that to the company's actual growth trend to judge whether the price is reasonable.</div>
+      </div>`
+    : '';
+
   document.getElementById('saValuation').innerHTML = `
     <div class="${cardClass}">
-      <div>Fair Value</div>
+      <div>Fair Value ${profileBadge}</div>
       <div class="fair-value">$${safeNum(val.fairValue).toFixed(2)}</div>
       <div class="potential">Upside: ${val.potential>0?'+':''}${safeNum(val.potential).toFixed(1)}%</div>
       <div>${rec}</div>
     </div>
     <div class="valuation-methods">
-      <div class="method-title">💎 All Methods (7)</div>
-      <div class="method-row" onmouseenter=\"saShowMethodTooltip('graham')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>1. Graham Number ℹ️</span><span>${val.graham>0?'$'+val.graham.toFixed(2):'N/A'}</span></div>
-      <div class="method-row" onmouseenter=\"saShowMethodTooltip('pe')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>2. P/E (${val.peMultiple}x) ℹ️</span><span>${val.peVal>0?'$'+val.peVal.toFixed(2):'N/A'}</span></div>
-      <div class="method-row" onmouseenter=\"saShowMethodTooltip('peg')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>3. PEG ℹ️</span><span>${val.pegVal>0?'$'+val.pegVal.toFixed(2):'N/A'}</span></div>
-      <div class="method-row" onmouseenter=\"saShowMethodTooltip('dcf')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>4. DCF ℹ️</span><span>${val.dcfVal>0?'$'+val.dcfVal.toFixed(2):'N/A'}</span></div>
-      <div class="method-row" onmouseenter=\"saShowMethodTooltip('ddm')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>5. DDM ℹ️</span><span>${val.ddmVal>0?'$'+val.ddmVal.toFixed(2):'N/A'}</span></div>
-      <div class="method-row" onmouseenter=\"saShowMethodTooltip('evEbitda')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>6. EV/EBITDA ℹ️</span><span>${val.evEbitdaVal>0?'$'+val.evEbitdaVal.toFixed(2):'N/A'}</span></div>
-      <div class="method-row" onmouseenter=\"saShowMethodTooltip('ps')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>7. P/S ℹ️</span><span>${val.psVal>0?'$'+val.psVal.toFixed(2):'N/A'}</span></div>
+      <div class="method-title">💎 All Methods (${val.validVals.length} of 8 used)</div>
+      <div class="method-row" onmouseenter=\"saShowMethodTooltip('graham')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>1. Graham Number ℹ️</span>${saMethodCell(val,'graham','graham')}</div>
+      <div class="method-row" onmouseenter=\"saShowMethodTooltip('pe')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>2. P/E (${val.peMultiple}x) ℹ️</span>${saMethodCell(val,'peVal','pe')}</div>
+      <div class="method-row" onmouseenter=\"saShowMethodTooltip('forwardPe')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>3. Forward P/E ℹ️</span>${saMethodCell(val,'forwardPeVal','forwardPe')}</div>
+      <div class="method-row" onmouseenter=\"saShowMethodTooltip('peg')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>4. PEG ℹ️</span>${saMethodCell(val,'pegVal','peg')}</div>
+      <div class="method-row" onmouseenter=\"saShowMethodTooltip('dcf')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>5. DCF ℹ️</span>${saMethodCell(val,'dcfVal','dcf')}</div>
+      <div class="method-row" onmouseenter=\"saShowMethodTooltip('ddm')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>6. DDM ℹ️</span>${saMethodCell(val,'ddmVal','ddm')}</div>
+      <div class="method-row" onmouseenter=\"saShowMethodTooltip('evEbitda')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>7. EV/EBITDA ℹ️</span>${saMethodCell(val,'evEbitdaVal','evEbitda')}</div>
+      <div class="method-row" onmouseenter=\"saShowMethodTooltip('ps')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>8. P/S ℹ️</span>${saMethodCell(val,'psVal','ps')}</div>
       <div class="method-row" style="background:rgba(59,130,246,.12);border-top:2px solid #3b82f6"><span style="font-weight:700">Weighted (${val.validVals.length} methods)</span><span style="font-weight:700;color:#60a5fa">$${safeNum(val.fairValue).toFixed(2)}</span></div>
+      ${dispersionHtml}
+      ${reverseDcfHtml}
     </div>`;
 
   }
@@ -2975,70 +3009,194 @@ function saRenderValuation(data) {
   }
 }
 
+// Detect a rough company profile from available metrics, used to pick
+// method weights that fit the business (a Graham/DDM-heavy blend makes
+// no sense for a 0.02%-yield hypergrowth stock, and vice versa).
+function saDetectProfile(data) {
+  const pe    = safeNum(data.pe);
+  const pb    = safeNum(data.pb);
+  const revG  = safeNum(data.revenueGrowth);
+  const divY  = safeNum(data.dividendYield); // already a % from Finnhub (e.g. 1.5 = 1.5%)
+
+  if (divY > 2 && revG < 10) return 'Dividend';
+  if (revG > 15 && (pe > 25 || pe <= 0)) return 'Growth';
+  if (pb > 0 && pb < 3 && pe > 0 && pe < 18) return 'Value';
+  return 'Blend';
+}
+
+// Method weights per profile. Graham/DDM are downweighted (not hard-removed)
+// for Growth names since they still print a number worth seeing — just not
+// one that should swing the weighted average.
+const SA_PROFILE_WEIGHTS = {
+  Growth:   { graham: 0.3, pe: 1.0, peg: 1.3, dcf: 1.6, ddm: 0.2, evEbitda: 1.3, ps: 1.4, forwardPe: 1.4 },
+  Value:    { graham: 1.4, pe: 1.3, peg: 1.0, dcf: 1.2, ddm: 0.8, evEbitda: 1.3, ps: 0.8, forwardPe: 1.1 },
+  Dividend: { graham: 1.2, pe: 1.0, peg: 0.8, dcf: 1.0, ddm: 1.6, evEbitda: 1.1, ps: 0.7, forwardPe: 1.0 },
+  Blend:    { graham: 1.0, pe: 1.2, peg: 1.3, dcf: 1.5, ddm: 1.0, evEbitda: 1.2, ps: 0.8, forwardPe: 1.2 },
+};
+
+// Binary-search the constant annual FCF growth rate that makes a 5yr+terminal
+// DCF (same shape as the forward DCF below) equal to the current price —
+// i.e. "what growth is the market paying for right now".
+function saImpliedGrowth(price, fcf, wacc, terminalGrowth) {
+  if (!(price > 0) || !(fcf > 0) || !(wacc > terminalGrowth)) return null;
+  const dcfAt = (g) => {
+    let pv = 0, f = fcf;
+    for (let yr = 1; yr <= 5; yr++) {
+      f = f * (1 + g);
+      pv += f / Math.pow(1 + wacc, yr);
+    }
+    const tv = (f * (1 + terminalGrowth)) / (wacc - terminalGrowth);
+    pv += tv / Math.pow(1 + wacc, 5);
+    return pv;
+  };
+  let lo = -0.5, hi = 2.0;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    if (dcfAt(mid) < price) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
 function saCalculateValuation(data) {
   // ── Safe accessors ──────────────────────────────────────────
-  const price       = safeNum(data.price);
-  const eps         = safeNum(data.eps);
-  const bookValue   = safeNum(data.bookValue);
-  const epsGrowth   = safeNum(data.epsGrowth);
-  const pe          = safeNum(data.pe);
-  const divPerShare = safeNum(data.dividendPerShare);
-  const revGrowth   = safeNum(data.revenueGrowth);
-  const evToEbitda  = safeNum(data.evToEbitda);
-  const priceToSales= safeNum(data.priceToSales);
-  const revPerShare = safeNum(data.revenuePerShare);
-  const fcfPerShare = safeNum(data.freeCashFlowPerShare);
+  const price        = safeNum(data.price);
+  const epsTTM        = safeNum(data.eps);
+  const epsNormalized = safeNum(data.epsNormalized);
+  const bookValue     = safeNum(data.bookValue);
+  const epsGrowth     = safeNum(data.epsGrowth);
+  const pe            = safeNum(data.pe);
+  const forwardPeRatio= safeNum(data.forwardPE);
+  const divPerShare   = safeNum(data.dividendPerShare);
+  const revGrowth     = safeNum(data.revenueGrowth);
+  const evToEbitdaRaw = safeNum(data.evToEbitda);
+  const priceToSales  = safeNum(data.priceToSales);
+  const revPerShare   = safeNum(data.revenuePerShare);
+  const fcfPerShareRaw= safeNum(data.freeCashFlowPerShare);
+  const beta          = safeNum(data.beta, 1) || 1;
+
+  // Reasons a method didn't produce a number — shown in the UI instead of a bare N/A.
+  const reasons = {};
+
+  // Normalized EPS fallback chain: TTM GAAP EPS → normalized EPS (Finnhub).
+  // MRVL-style names with negative GAAP EPS (amortization of acquisitions)
+  // otherwise lose Graham/P/E/PEG entirely even though a usable number exists.
+  let eps = epsTTM;
+  let epsSource = 'TTM';
+  if (!(eps > 0) && epsNormalized > 0) { eps = epsNormalized; epsSource = 'Normalized'; }
+  if (!(eps > 0)) epsSource = 'none';
+
+  const profile = saDetectProfile(data);
+  const w = SA_PROFILE_WEIGHTS[profile];
 
   // 1. Graham Number — √(22.5 × EPS × Book Value)
-  const graham = (eps > 0 && bookValue > 0)
-    ? Math.sqrt(22.5 * eps * bookValue)
-    : 0;
+  let graham = 0;
+  if (eps > 0 && bookValue > 0) {
+    graham = Math.sqrt(22.5 * eps * bookValue);
+  } else {
+    reasons.graham = eps <= 0 ? 'Negative/zero EPS (TTM & normalized)' : 'No book value per share';
+  }
 
   // 2. P/E Valuation — EPS × sector multiple
   let peMultiple = 18;
   if (data.sector === 'Technology' || data.sector === 'Semiconductors') peMultiple = 25;
   else if (epsGrowth > 20) peMultiple = 22;
   else if (epsGrowth > 0 && epsGrowth < 5) peMultiple = 15;
-  const peVal = eps > 0 ? eps * peMultiple : 0;
+  let peVal = 0;
+  if (eps > 0) peVal = eps * peMultiple;
+  else reasons.pe = 'Negative/zero EPS (TTM & normalized)';
 
-  // 3. PEG — guard: epsGrowth must be > 0.5 AND pe/epsGrowth must be finite
+  // 2b. Forward P/E — forwardEPS (price / forward P/E) × sector multiple.
+  // Finnhub's Free plan usually doesn't include forward estimates, so this
+  // is commonly excluded — we say why instead of a bare N/A.
+  let forwardPeVal = 0;
+  if (forwardPeRatio > 0 && price > 0) {
+    const forwardEps = price / forwardPeRatio;
+    if (forwardEps > 0) forwardPeVal = forwardEps * peMultiple;
+  } else {
+    reasons.forwardPe = 'Forward EPS estimates not available (Finnhub Free plan)';
+  }
+
+  // 3. PEG — Price / (P/E / growth), with growth capped so hypergrowth
+  // TTM figures (NVDA-style 80–100%+) don't blow the fair value out to
+  // multiples of the current price.
   let pegVal = 0;
   if (eps > 0 && epsGrowth > 0.5 && pe > 0) {
-    const pegRatio = pe / epsGrowth;
+    const growthCapped = Math.min(epsGrowth, 30);
+    const pegRatio = pe / growthCapped;
     if (isFinite(pegRatio) && pegRatio > 0) {
       pegVal = price * (1.0 / pegRatio);
     }
+  } else {
+    reasons.peg = eps <= 0 ? 'Negative/zero EPS' : (epsGrowth <= 0.5 ? 'No positive EPS growth' : 'P/E unavailable');
   }
 
-  // 4. DCF — use FCF/share; fallback to eps*0.8 if FCF missing/negative
+  // 4. DCF — two-stage: growth tapers linearly from a capped stage-1 rate
+  // down to a 3% terminal rate over 5 years, discounted at a CAPM-derived
+  // WACC proxy (risk-free + beta × equity risk premium) instead of a fixed
+  // 10%/7% assumption baked in regardless of the company's risk profile.
+  const RISK_FREE = 0.04, ERP = 0.055, TERMINAL_G = 0.03;
+  const wacc = Math.min(Math.max(RISK_FREE + beta * ERP, 0.06), 0.16);
   let dcfVal = 0;
-  let fcf = fcfPerShare > 0 ? fcfPerShare : (eps > 0 ? eps * 0.8 : 0);
-  if (fcf > 0 && Math.abs(epsGrowth) > 0.1) {
-    const gr = Math.min(Math.abs(epsGrowth) / 100, 0.25);
-    const dr = 0.10;
-    let pv = 0;
-    for (let i = 1; i <= 5; i++) {
-      pv += (fcf * Math.pow(1 + gr, i)) / Math.pow(1 + dr, i);
+  let fcfSource = '';
+  const fcfPerShare = fcfPerShareRaw > 0 ? fcfPerShareRaw : (eps > 0 ? eps * 0.8 : 0);
+  if (fcfPerShareRaw > 0) fcfSource = 'Reported FCF/share (TTM)';
+  else if (eps > 0) fcfSource = 'Estimated as EPS × 0.8 (FCF/share unavailable)';
+
+  if (fcfPerShare > 0) {
+    const g1 = Math.min(Math.max(Math.abs(epsGrowth || revGrowth) / 100, 0), 0.30);
+    let pv = 0, fcfProj = fcfPerShare;
+    for (let yr = 1; yr <= 5; yr++) {
+      const gYear = g1 - ((g1 - TERMINAL_G) * (yr - 1) / 4); // taper toward terminal growth
+      fcfProj = fcfProj * (1 + gYear);
+      pv += fcfProj / Math.pow(1 + wacc, yr);
     }
-    // Terminal value — Gordon growth at 3%, denom always 0.07 (10%-3%)
-    const terminalFCF = fcf * Math.pow(1 + gr, 5) * 1.03;
-    pv += (terminalFCF / 0.07) / Math.pow(1 + dr, 5);
-    dcfVal = isFinite(pv) ? pv : 0;
+    const terminalValue = (fcfProj * (1 + TERMINAL_G)) / (wacc - TERMINAL_G);
+    pv += terminalValue / Math.pow(1 + wacc, 5);
+    dcfVal = isFinite(pv) && pv > 0 ? pv : 0;
+  } else {
+    reasons.dcf = 'No FCF/share or EPS to project cash flows from';
   }
 
-  // 5. DDM — Gordon Growth: D*(1+g)/(r-g), guard: denom must be > 0.001
+  // Reverse DCF — implied growth the current price already assumes, using
+  // the same WACC/terminal-growth pair as the forward DCF above.
+  const impliedGrowth = fcfPerShare > 0 ? saImpliedGrowth(price, fcfPerShare, wacc, TERMINAL_G) : null;
+
+  // 5. DDM — Gordon Growth: D×(1+g)/(r-g). Naturally excluded (0 dividend)
+  // for most growth names; weight is also cut for the Growth profile above.
   let ddmVal = 0;
   if (divPerShare > 0 && revGrowth > 0) {
     const g = Math.min(revGrowth / 100, 0.06);
     const denom = 0.10 - g;
-    if (denom > 0.001) {
-      ddmVal = (divPerShare * (1 + g)) / denom;
-    }
+    if (denom > 0.001) ddmVal = (divPerShare * (1 + g)) / denom;
+    else reasons.ddm = 'Implied growth too close to discount rate';
+  } else {
+    reasons.ddm = divPerShare <= 0 ? 'No dividends paid' : 'No positive revenue growth';
   }
 
-  // 6. EV/EBITDA — sector target multiples
+  // 6. EV/EBITDA — sector target multiple vs current ratio. If Finnhub's
+  // ev/ebitdaTTM field is missing (common), fall back to a self-computed
+  // ratio from enterpriseValue and EBITDA/share × shares outstanding.
+  let evToEbitdaEff = evToEbitdaRaw;
+  let evEbitdaSource = evToEbitdaRaw > 0 ? 'Finnhub ev/ebitdaTTM' : '';
+  if (!(evToEbitdaEff > 0)) {
+    const shares = safeNum(data.sharesOutstanding);
+    const ebitdaPerShare = safeNum(data.ebitdaPerShare);
+    let ev = safeNum(data.enterpriseValue);
+    if (!(ev > 0) && shares > 0) {
+      // Approximate EV = market cap + debt (via D/E × equity); cash isn't
+      // available on the Free plan so this slightly overstates EV.
+      const totalEquity = bookValue * shares;
+      const totalDebtApprox = totalEquity > 0 ? totalEquity * safeNum(data.debtToEquity) : 0;
+      ev = price * shares + totalDebtApprox;
+    }
+    const ebitdaAbs = ebitdaPerShare > 0 && shares > 0 ? ebitdaPerShare * shares : 0;
+    if (ev > 0 && ebitdaAbs > 0) {
+      evToEbitdaEff = ev / ebitdaAbs;
+      evEbitdaSource = 'Computed from enterprise value & EBITDA (approx.)';
+    }
+  }
   let evEbitdaVal = 0;
-  if (evToEbitda > 0 && evToEbitda < 100) {
+  if (evToEbitdaEff > 0 && evToEbitdaEff < 100) {
     const sectorMultiples = {
       'Technology': 18, 'Healthcare': 16, 'Financial Services': 12,
       'Consumer Cyclical': 14, 'Consumer Defensive': 15, 'Industrials': 13,
@@ -3046,7 +3204,9 @@ function saCalculateValuation(data) {
       'Communication Services': 14, 'Semiconductors': 18
     };
     const target = sectorMultiples[data.sector] || 14;
-    evEbitdaVal = price * (target / evToEbitda);
+    evEbitdaVal = price * (target / evToEbitdaEff);
+  } else {
+    reasons.evEbitda = 'EV/EBITDA unavailable from Finnhub and could not be computed';
   }
 
   // 7. P/S — revenue per share × target multiple
@@ -3057,17 +3217,20 @@ function saCalculateValuation(data) {
     else if (revGrowth > 20) tps = 4;
     else if (revGrowth > 10) tps = 3;
     psVal = revPerShare * tps;
+  } else {
+    reasons.ps = 'Missing P/S ratio or revenue/share';
   }
 
   // ── Weighted average — filter out zeros, Infinity, and absurd outliers ──
   const vals = {
-    graham:   { value: graham,      weight: 1.0 },
-    pe:       { value: peVal,       weight: 1.2 },
-    peg:      { value: pegVal,      weight: 1.3 },
-    dcf:      { value: dcfVal,      weight: 1.5 },
-    ddm:      { value: ddmVal,      weight: 1.0 },
-    evEbitda: { value: evEbitdaVal, weight: 1.2 },
-    ps:       { value: psVal,       weight: 0.8 },
+    graham:    { value: graham,       weight: w.graham },
+    pe:        { value: peVal,        weight: w.pe },
+    forwardPe: { value: forwardPeVal, weight: w.forwardPe },
+    peg:       { value: pegVal,       weight: w.peg },
+    dcf:       { value: dcfVal,       weight: w.dcf },
+    ddm:       { value: ddmVal,       weight: w.ddm },
+    evEbitda:  { value: evEbitdaVal,  weight: w.evEbitda },
+    ps:        { value: psVal,        weight: w.ps },
   };
 
   const validVals = Object.values(vals).filter(v =>
@@ -3087,8 +3250,20 @@ function saCalculateValuation(data) {
     ? ((fairValue - price) / price) * 100
     : 0;
 
-  return { graham, peVal, pegVal, dcfVal, ddmVal, evEbitdaVal, psVal,
-           fairValue, potential, peMultiple, validVals };
+  // Dispersion — how far apart the surviving methods are, as a sanity signal.
+  let dispersion = null;
+  if (validVals.length >= 2) {
+    const nums = validVals.map(v => v.value);
+    const minV = Math.min(...nums), maxV = Math.max(...nums);
+    const mean = nums.reduce((a, b) => a + b, 0) / nums.length;
+    const stdev = Math.sqrt(nums.reduce((a, b) => a + (b - mean) ** 2, 0) / nums.length);
+    dispersion = { min: minV, max: maxV, ratio: minV > 0 ? maxV / minV : null, stdev, high: minV > 0 && (maxV / minV) > 3 };
+  }
+
+  return { graham, peVal, forwardPeVal, pegVal, dcfVal, ddmVal, evEbitdaVal, psVal,
+           fairValue, potential, peMultiple, validVals,
+           profile, reasons, epsSource, fcfSource, evEbitdaSource,
+           wacc, impliedGrowth, dispersion };
 }
 
 function saRenderFinancials(data) {
@@ -3719,12 +3894,13 @@ async function saExportFullPDF() {
     pdf.text(recText, PW - M - 20.5 + (recText.length === 4 ? -2 : 0), y + 12);
     y += 27;
 
-    drawSection('Valuation Methods');
+    drawSection('Valuation Methods (' + val.profile + ' profile)');
     const methods = [
       ['Graham Number',    val.graham    > 0 ? '$' + val.graham.toFixed(2)    : 'N/A'],
       ['P/E (' + val.peMultiple + 'x)', val.peVal > 0 ? '$' + val.peVal.toFixed(2) : 'N/A'],
+      ['Forward P/E',      val.forwardPeVal > 0 ? '$' + val.forwardPeVal.toFixed(2) : 'N/A'],
       ['PEG Ratio',        val.pegVal    > 0 ? '$' + val.pegVal.toFixed(2)    : 'N/A'],
-      ['DCF (5yr)',        val.dcfVal    > 0 ? '$' + val.dcfVal.toFixed(2)    : 'N/A'],
+      ['DCF (5yr, 2-stage)', val.dcfVal  > 0 ? '$' + val.dcfVal.toFixed(2)    : 'N/A'],
       ['DDM (Gordon)',     val.ddmVal    > 0 ? '$' + val.ddmVal.toFixed(2)    : 'N/A'],
       ['EV/EBITDA',        val.evEbitdaVal > 0 ? '$' + val.evEbitdaVal.toFixed(2) : 'N/A'],
       ['Price/Sales',      val.psVal     > 0 ? '$' + val.psVal.toFixed(2)     : 'N/A'],
@@ -3813,7 +3989,7 @@ function saCopyToClipboard() {
     const pe  = safeNum(d.pe)  > 0 ? safeNum(d.pe).toFixed(2)  : 'N/A';
     const eps = safeNum(d.eps) !== 0 ? '$' + safeNum(d.eps).toFixed(2) : 'N/A';
     const roe = safeNum(d.roe) !== 0 ? safeNum(d.roe).toFixed(2) + '%' : 'N/A';
-    const text = `📊 *${d.name} (${d.symbol})*\n\n💰 Price: $${safeNum(d.price).toFixed(2)}\n🏢 Sector: ${d.sector || 'N/A'}\n\n*Valuation*\nFair Value: $${safeNum(val.fairValue).toFixed(2)}\nUpside: ${pot > 0 ? '+' : ''}${pot.toFixed(1)}%\nSignal: ${rec}\n\n*Metrics*\nP/E: ${pe}\nEPS: ${eps}\nROE: ${roe}\n\nSource: Finnhub API`;
+    const text = `📊 *${d.name} (${d.symbol})*\n\n💰 Price: $${safeNum(d.price).toFixed(2)}\n🏢 Sector: ${d.sector || 'N/A'} • ${val.profile} profile\n\n*Valuation*\nFair Value: $${safeNum(val.fairValue).toFixed(2)} (${val.validVals.length} methods)\nUpside: ${pot > 0 ? '+' : ''}${pot.toFixed(1)}%\nSignal: ${rec}\n\n*Metrics*\nP/E: ${pe}\nEPS: ${eps}\nROE: ${roe}\n\nSource: Finnhub API`;
     navigator.clipboard.writeText(text)
       .then(() => saShowNotification('✓ Copied!'))
       .catch(() => saShowNotification('⚠️ Clipboard unavailable'));
@@ -3961,7 +4137,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Service Worker registration ───────────────────────────────
 // Bump APP_VERSION AND CACHE_NAME in sw.js together on every deploy.
 // The version check below clears old caches immediately on load.
-const APP_VERSION = '1.5';
+const APP_VERSION = '1.6';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
