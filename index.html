@@ -2560,10 +2560,10 @@ const SA_METHOD_TOOLTIPS = {
   graham:    { title:'Graham Number',     formula:'√(22.5 × EPS × Book Value)', desc:'Conservative estimate by Benjamin Graham. Uses normalized EPS if TTM EPS is negative.' },
   pe:        { title:'P/E Valuation',     formula:'EPS × P/E Multiple',         desc:'Earnings-based valuation. P/E varies by sector' },
   forwardPe: { title:'Forward P/E',       formula:'(Price/Fwd P/E) × Sector Mult', desc:'Uses forward EPS estimates — often unavailable on free data plans' },
-  peg:       { title:'PEG Ratio',         formula:'Price / (P/E / Growth, capped at 30%)', desc:'P/E adjusted for growth. Growth is capped so hyper-growth TTM figures don\'t distort it' },
+  peg:       { title:'PEG Ratio',         formula:'Price / (P/E / Growth, capped at 60%)', desc:'Uses EPS growth when positive, otherwise revenue growth (EPS growth is often negative/unusable right after a loss-to-profit swing)' },
   dcf:       { title:'DCF (5yr, 2-stage)',formula:'Σ(FCF/(1+WACC)^t)+Terminal', desc:'WACC estimated via CAPM (risk-free + β×premium). Growth tapers to 3% terminal over 5 years.' },
   ddm:       { title:'Dividend Discount', formula:'D×(1+g)/(r-g)',              desc:"Gordon Model for dividend stocks. Needs an actual dividend." },
-  evEbitda:  { title:'EV/EBITDA',         formula:'Price × (Sector/Current)',   desc:'Falls back to a self-computed EV/EBITDA when Finnhub has no direct ratio' },
+  evEbitda:  { title:'EV/EBITDA',         formula:'Price × (Sector/Current)',   desc:'3-tier fallback: Finnhub ratio → computed from EV & reported EBITDA → approximated from operating margin if no EBITDA figure exists at all' },
   ps:        { title:'Price/Sales',       formula:'Revenue × Target P/S',       desc:'Revenue-based valuation' }
 };
 
@@ -2920,11 +2920,27 @@ function saRenderOverview(data) {
   const eps = safeNum(data.eps),  pe  = safeNum(data.pe),
         roe = safeNum(data.roe),  pm  = safeNum(data.profitMargin),
         pb  = safeNum(data.pb),   de  = safeNum(data.debtToEquity),
-        evE = safeNum(data.evToEbitda), qr = safeNum(data.quickRatio),
+        qr = safeNum(data.quickRatio),
         gm  = safeNum(data.grossMargin), om = safeNum(data.operatingMargin),
-        rg  = safeNum(data.revenueGrowth), eg = safeNum(data.epsGrowth);
-  const peg = (pe > 0 && eg > 0) ? pe / eg : 0;
+        rg  = safeNum(data.revenueGrowth);
   const f2  = (v, sfx='') => v !== 0 ? v.toFixed(2) + sfx : 'N/A';
+
+  // Reuse the same valuation engine (with its normalized-EPS and EBITDA
+  // fallbacks) instead of a separate, simpler calc — otherwise PEG/EV-EBITDA
+  // can disagree between this tab and Valuation for the same ticker.
+  const val = saCalculateValuation(data);
+  const peg = safeNum(val.pegRatioEff);
+  const pegLabel = peg > 0
+    ? f2(peg) + (val.pegGrowthSource === 'Revenue growth (EPS growth unusable)' ? ' *' : '')
+    : 'N/A';
+  const evE = safeNum(val.evToEbitdaEff);
+  const evELabel = evE > 0
+    ? f2(evE, 'x') + (val.evEbitdaSource && val.evEbitdaSource.indexOf('Finnhub') === -1 ? ' ≈' : '')
+    : 'N/A';
+  const footnotes = [];
+  if (peg > 0 && val.pegGrowthSource === 'Revenue growth (EPS growth unusable)') footnotes.push('* PEG uses revenue growth — EPS growth was negative/unusable');
+  if (evE > 0 && val.evEbitdaSource && val.evEbitdaSource.indexOf('Finnhub') === -1) footnotes.push('≈ EV/EBITDA is computed (' + val.evEbitdaSource + '), not a value reported by Finnhub directly');
+
   document.getElementById('saOverview').innerHTML = `
     <h2 class="section-title">📋 Key Metrics</h2>
     <div class="metrics-grid">
@@ -2937,13 +2953,14 @@ function saRenderOverview(data) {
     </div>
     <h2 class="section-title" style="margin-top:30px">💪 Financial Health</h2>
     <div class="metrics-grid">
-      ${saMC('PEG Ratio',       f2(peg),     'peg',     peg)}
-      ${saMC('EV/EBITDA',       f2(evE,'x'), 'evEbitda',evE)}
+      ${saMC('PEG Ratio',       pegLabel,    'peg',     peg)}
+      ${saMC('EV/EBITDA',       evELabel,    'evEbitda',evE)}
       ${saMC('Quick Ratio',     f2(qr),      'qr',      qr)}
       ${saMC('Gross Margin',    f2(gm,'%'),  'grossM',  gm)}
       ${saMC('Operating Margin',f2(om,'%'),  'opM',     om)}
       ${saMC('Revenue Growth',  f2(rg,'%'),  'revGrow', rg)}
-    </div>`;
+    </div>
+    ${footnotes.length ? `<div style="margin-top:14px;font-size:.78em;color:#64748b;line-height:1.6">${footnotes.join('<br>')}</div>` : ''}`;
   }
   catch(e) {
     console.error('[saRenderOverview]', e);
@@ -3119,15 +3136,24 @@ function saCalculateValuation(data) {
   // 3. PEG — Price / (P/E / growth), with growth capped so hypergrowth
   // TTM figures (NVDA-style 80–100%+) don't blow the fair value out to
   // multiples of the current price.
-  let pegVal = 0;
-  if (eps > 0 && epsGrowth > 0.5 && pe > 0) {
-    const growthCapped = Math.min(epsGrowth, 30);
-    const pegRatio = pe / growthCapped;
-    if (isFinite(pegRatio) && pegRatio > 0) {
-      pegVal = price * (1.0 / pegRatio);
+  // Growth input for PEG: EPS growth when it's a usable positive number,
+  // otherwise revenue growth. GAAP EPS growth is frequently negative or
+  // nonsensical right after a loss-to-profit swing (MRVL/INTC-style), even
+  // though the business is clearly growing — falling back to revenue growth
+  // keeps PEG computable instead of dropping the method entirely.
+  let pegGrowth = 0, pegGrowthSource = '';
+  if (epsGrowth > 0.5) { pegGrowth = epsGrowth; pegGrowthSource = 'EPS growth'; }
+  else if (revGrowth > 0.5) { pegGrowth = revGrowth; pegGrowthSource = 'Revenue growth (EPS growth unusable)'; }
+
+  let pegVal = 0, pegRatioEff = 0;
+  if (eps > 0 && pegGrowth > 0.5 && pe > 0) {
+    const growthCapped = Math.min(pegGrowth, 60);
+    pegRatioEff = pe / growthCapped;
+    if (isFinite(pegRatioEff) && pegRatioEff > 0) {
+      pegVal = price * (1.0 / pegRatioEff);
     }
   } else {
-    reasons.peg = eps <= 0 ? 'Negative/zero EPS' : (epsGrowth <= 0.5 ? 'No positive EPS growth' : 'P/E unavailable');
+    reasons.peg = eps <= 0 ? 'Negative/zero EPS' : (pegGrowth <= 0.5 ? 'No usable EPS or revenue growth' : 'P/E unavailable');
   }
 
   // 4. DCF — two-stage: growth tapers linearly from a capped stage-1 rate
@@ -3173,14 +3199,21 @@ function saCalculateValuation(data) {
     reasons.ddm = divPerShare <= 0 ? 'No dividends paid' : 'No positive revenue growth';
   }
 
-  // 6. EV/EBITDA — sector target multiple vs current ratio. If Finnhub's
-  // ev/ebitdaTTM field is missing (common), fall back to a self-computed
-  // ratio from enterpriseValue and EBITDA/share × shares outstanding.
+  // 6. EV/EBITDA — sector target multiple vs current ratio.
+  // Tier 1: Finnhub's own ev/ebitdaTTM/Annual ratio (often missing).
+  // Tier 2: self-computed from enterpriseValue and EBITDA/share × shares —
+  //   this fails whenever Finnhub doesn't populate ebitdPerShareTTM/Annual
+  //   for that ticker (seen on AMD even though it worked for NVDA).
+  // Tier 3: EBIT-based proxy (operating margin × revenue/share) standing in
+  //   for EBITDA when no per-share EBITDA figure exists at all. This slightly
+  //   *understates* true EBITDA (no D&A add-back), which slightly *overstates*
+  //   the computed ratio — flagged clearly in evEbitdaSource so it reads as
+  //   an approximation, not a reported number.
+  const shares = safeNum(data.sharesOutstanding);
   let evToEbitdaEff = evToEbitdaRaw;
   let evEbitdaSource = evToEbitdaRaw > 0 ? 'Finnhub ev/ebitdaTTM' : '';
-  if (!(evToEbitdaEff > 0)) {
-    const shares = safeNum(data.sharesOutstanding);
-    const ebitdaPerShare = safeNum(data.ebitdaPerShare);
+
+  const computeEv = () => {
     let ev = safeNum(data.enterpriseValue);
     if (!(ev > 0) && shares > 0) {
       // Approximate EV = market cap + debt (via D/E × equity); cash isn't
@@ -3189,12 +3222,30 @@ function saCalculateValuation(data) {
       const totalDebtApprox = totalEquity > 0 ? totalEquity * safeNum(data.debtToEquity) : 0;
       ev = price * shares + totalDebtApprox;
     }
+    return ev;
+  };
+
+  if (!(evToEbitdaEff > 0)) {
+    const ev = computeEv();
+    const ebitdaPerShare = safeNum(data.ebitdaPerShare);
     const ebitdaAbs = ebitdaPerShare > 0 && shares > 0 ? ebitdaPerShare * shares : 0;
     if (ev > 0 && ebitdaAbs > 0) {
       evToEbitdaEff = ev / ebitdaAbs;
-      evEbitdaSource = 'Computed from enterprise value & EBITDA (approx.)';
+      evEbitdaSource = 'Computed from enterprise value & reported EBITDA/share';
     }
   }
+
+  if (!(evToEbitdaEff > 0)) {
+    const ev = computeEv();
+    const operatingMargin = safeNum(data.operatingMargin);
+    const ebitProxyPerShare = operatingMargin > 0 && revPerShare > 0 ? (operatingMargin / 100) * revPerShare : 0;
+    const ebitdaProxyAbs = ebitProxyPerShare > 0 && shares > 0 ? ebitProxyPerShare * shares : 0;
+    if (ev > 0 && ebitdaProxyAbs > 0) {
+      evToEbitdaEff = ev / ebitdaProxyAbs;
+      evEbitdaSource = 'Approximated from operating margin (no D&A data — likely overstates the ratio)';
+    }
+  }
+
   let evEbitdaVal = 0;
   if (evToEbitdaEff > 0 && evToEbitdaEff < 100) {
     const sectorMultiples = {
@@ -3263,6 +3314,7 @@ function saCalculateValuation(data) {
   return { graham, peVal, forwardPeVal, pegVal, dcfVal, ddmVal, evEbitdaVal, psVal,
            fairValue, potential, peMultiple, validVals,
            profile, reasons, epsSource, fcfSource, evEbitdaSource,
+           evToEbitdaEff, pegRatioEff, pegGrowthSource,
            wacc, impliedGrowth, dispersion };
 }
 
@@ -3915,8 +3967,8 @@ async function saExportFullPDF() {
       ['EPS (TTM)',          n2s(d.eps, 2, '$')],
       ['P/E Ratio',          safeNum(d.pe) > 0 ? safeNum(d.pe).toFixed(2) + 'x' : 'N/A'],
       ['P/B Ratio',          safeNum(d.pb) > 0 ? safeNum(d.pb).toFixed(2) + 'x' : 'N/A'],
-      ['EV/EBITDA',          safeNum(d.evToEbitda) > 0 ? safeNum(d.evToEbitda).toFixed(2) + 'x' : 'N/A'],
-      ['PEG Ratio',          (safeNum(d.pe) > 0 && safeNum(d.epsGrowth) > 0) ? (safeNum(d.pe)/safeNum(d.epsGrowth)).toFixed(2) : 'N/A'],
+      ['EV/EBITDA',          safeNum(val.evToEbitdaEff) > 0 ? safeNum(val.evToEbitdaEff).toFixed(2) + 'x' + (val.evEbitdaSource && val.evEbitdaSource.indexOf('Finnhub') === -1 ? ' (approx.)' : '') : 'N/A'],
+      ['PEG Ratio',          safeNum(val.pegRatioEff) > 0 ? safeNum(val.pegRatioEff).toFixed(2) + (val.pegGrowthSource === 'Revenue growth (EPS growth unusable)' ? ' (rev. growth)' : '') : 'N/A'],
       ['ROE',                pct(d.roe)],
       ['ROIC',               pct(d.roic)],
       ['Profit Margin',      pct(d.profitMargin)],
@@ -4137,7 +4189,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Service Worker registration ───────────────────────────────
 // Bump APP_VERSION AND CACHE_NAME in sw.js together on every deploy.
 // The version check below clears old caches immediately on load.
-const APP_VERSION = '1.6';
+const APP_VERSION = '1.6.1';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
