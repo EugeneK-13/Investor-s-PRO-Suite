@@ -153,15 +153,13 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
 #page-stock .metric-card{background:#f8fafc;padding:20px;border-radius:12px;border-left:4px solid #3b82f6;color:#1e293b}
 #page-stock .metric-value{font-size:1.8em;font-weight:700}
 #page-stock .section-title{font-size:1.5em;font-weight:600;margin-bottom:20px;color:#1e293b}
-#page-stock .financial-table,.report-table{width:100%;border-collapse:collapse}
-#page-stock .financial-table tr,.report-table tr{border-bottom:1px solid #e2e8f0}
-#page-stock .financial-table td,.report-table td{padding:15px;color:#1e293b}
-#page-stock .report-table th{background:#f1f5f9;padding:12px;text-align:left;font-weight:600;color:#1e293b}
+#page-stock .financial-table{width:100%;border-collapse:collapse}
+#page-stock .financial-table tr{border-bottom:1px solid #e2e8f0}
+#page-stock .financial-table td{padding:15px;color:#1e293b}
 #page-stock .criteria-item{display:flex;align-items:center;gap:10px;padding:12px;margin-bottom:10px;background:#f8fafc;border-radius:8px;color:#1e293b}
 #page-stock .criteria-item.pass{background:#dcfce7;border-left:4px solid #10b981}
 #page-stock .criteria-item.hold{background:#fef3c7;border-left:4px solid #f59e0b}
 #page-stock .criteria-item.fail{background:#fee2e2;border-left:4px solid #ef4444}
-#page-stock .warning-box{background:#fef3c7;border-left:4px solid #f59e0b;padding:15px 20px;border-radius:8px;margin-bottom:20px;color:#1e293b}
 #page-stock .s-copy-notif{position:fixed;top:20px;right:20px;background:#10b981;color:#fff;padding:15px 25px;border-radius:10px;font-weight:600;display:none;z-index:2000}
 #page-stock .watchlist-item{padding:15px;background:#f8fafc;border-radius:10px;margin-bottom:10px;cursor:pointer;display:flex;justify-content:space-between;color:#1e293b}
 #page-stock .delete-btn{padding:8px 16px;background:#ef4444;color:#fff;border:none;border-radius:8px;cursor:pointer}
@@ -169,19 +167,6 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
 #page-stock .alert-input{padding:12px;border:2px solid #e2e8f0;border-radius:8px;color:#1e293b}
 #page-stock .alert-btn{padding:15px;background:#3b82f6;color:#fff;border:none;border-radius:10px;font-weight:600;cursor:pointer}
 #page-stock .empty-state{text-align:center;padding:40px;color:#64748b}
-#page-stock .options-card{background:#fff;border-radius:15px;padding:25px;margin-bottom:20px;border-left:4px solid #8b5cf6}
-#page-stock .strategy-select{width:100%;padding:12px;font-size:1.1em;border:2px solid #e2e8f0;border-radius:8px;margin-bottom:20px;font-weight:600;color:#1e293b}
-#page-stock .input-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin-bottom:20px}
-#page-stock .input-group{display:flex;flex-direction:column}
-#page-stock .input-label{font-weight:600;margin-bottom:5px;color:#475569;font-size:0.9em}
-#page-stock .input-field{padding:12px;border:2px solid #e2e8f0;border-radius:8px;font-size:1em;color:#1e293b}
-#page-stock .calc-btn{padding:15px 30px;background:linear-gradient(135deg,#8b5cf6 0%,#7c3aed 100%);color:#fff;border:none;border-radius:12px;font-size:1.1em;font-weight:600;cursor:pointer;width:100%;font-family:'DM Sans',sans-serif}
-#page-stock .result-card{background:linear-gradient(135deg,#8b5cf6 0%,#7c3aed 100%);color:#fff;border-radius:15px;padding:30px;margin:20px 0;display:none}
-#page-stock .result-title{font-size:1.5em;font-weight:700;margin-bottom:20px}
-#page-stock .result-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px}
-#page-stock .result-item{background:rgba(255,255,255,0.1);padding:15px;border-radius:10px}
-#page-stock .result-label{font-size:0.9em;opacity:0.9;margin-bottom:5px}
-#page-stock .result-value{font-size:1.5em;font-weight:700}
 #page-stock #plChart{width:100%;height:300px;background:#fff;border-radius:10px;margin-top:20px;display:none}
 #page-stock .financials-section{margin-bottom:30px}
 #page-stock .info-label{font-size:.62rem;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;opacity:.7;display:block;margin-bottom:3px}
@@ -804,34 +789,6 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
   #page-investors #liRadarChart{ width:200px !important; height:200px !important; }
 }
 
-/* ===== PRICE CHART RANGE BUTTONS ===== */
-#page-stock .sa-range-btn{
-  padding:6px 14px;
-  background:rgba(255,255,255,.06);
-  border:1px solid rgba(255,255,255,.1);
-  border-radius:8px;
-  color:#94a3b8;
-  font-size:.8rem;
-  font-weight:700;
-  cursor:pointer;
-  transition:all .2s;
-  font-family:'DM Mono',monospace;
-}
-#page-stock .sa-range-btn:hover{
-  background:rgba(102,126,234,.2);
-  border-color:rgba(102,126,234,.4);
-  color:#a5b4fc;
-}
-#page-stock .sa-range-btn.active{
-  background:linear-gradient(135deg,#667eea,#764ba2);
-  border-color:transparent;
-  color:#fff;
-}
-#page-stock #saPriceChart{
-  width:100% !important;
-  height:320px !important;
-}
-
 /* ===== PORTFOLIO PIE CHART ===== */
 #page-position .pm-pie-wrap{
   display:flex;
@@ -936,51 +893,6 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
   margin-top:10px;
   text-align:center;
   font-family:'DM Mono',monospace;
-}
-
-/* ===== OPTIONS P&L CHART ===== */
-#page-stock .pl-chart-wrap{
-  display:none;
-  margin-top:22px;
-  background:rgba(0,0,0,.25);
-  border:1px solid rgba(255,255,255,.08);
-  border-radius:16px;
-  padding:20px 20px 12px;
-}
-#page-stock .pl-chart-title{
-  font-family:'Syne',sans-serif;
-  font-size:.82rem;
-  font-weight:700;
-  letter-spacing:.6px;
-  text-transform:uppercase;
-  color:#94a3b8;
-  margin-bottom:14px;
-  display:flex;
-  align-items:center;
-  gap:8px;
-}
-#page-stock #saPlChart{
-  width:100% !important;
-  height:260px !important;
-  display:block;
-  border-radius:8px;
-}
-#page-stock .pl-chart-legend{
-  display:flex;
-  gap:18px;
-  flex-wrap:wrap;
-  margin-top:12px;
-}
-#page-stock .pl-chart-legend-item{
-  display:flex;
-  align-items:center;
-  gap:6px;
-  font-size:.72rem;
-  color:#94a3b8;
-  font-family:'DM Mono',monospace;
-}
-#page-stock .pl-chart-legend-dot{
-  width:10px;height:10px;border-radius:2px;flex-shrink:0;
 }
 
 /* ===== FORM VALIDATION ===== */
@@ -1208,58 +1120,11 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
       <button class="s-tab" onclick="saSwitchTab('saValuation',this)">💎 Valuation</button>
       <button class="s-tab" onclick="saSwitchTab('saFinancials',this)">📊 Financials</button>
       <button class="s-tab" onclick="saSwitchTab('saAnalysis',this)">🎯 Analysis</button>
-      <button class="s-tab" onclick="saSwitchTab('saChart',this);saLoadPriceChart()">📉 Chart</button>
-      <button class="s-tab" onclick="saSwitchTab('saReports',this)">📄 Reports</button>
-      <button class="s-tab" onclick="saSwitchTab('saOptions',this)">📈 Options</button>
     </div>
     <div class="s-tab-content active" id="saOverview"></div>
     <div class="s-tab-content" id="saValuation"></div>
     <div class="s-tab-content" id="saFinancials"></div>
     <div class="s-tab-content" id="saAnalysis"></div>
-    <div class="s-tab-content" id="saChart">
-      <h2 class="section-title">📉 Price History</h2>
-      <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap" id="saChartRangeBtns">
-        <button class="sa-range-btn active" onclick="saLoadPriceChart('1M')">1M</button>
-        <button class="sa-range-btn" onclick="saLoadPriceChart('3M')">3M</button>
-        <button class="sa-range-btn" onclick="saLoadPriceChart('6M')">6M</button>
-        <button class="sa-range-btn" onclick="saLoadPriceChart('1Y')">1Y</button>
-        <button class="sa-range-btn" onclick="saLoadPriceChart('2Y')">2Y</button>
-        <button class="sa-range-btn" onclick="saLoadPriceChart('5Y')">5Y</button>
-      </div>
-      <div id="saChartStatus" style="color:#64748b;font-size:.85rem;margin-bottom:10px"></div>
-      <div style="position:relative;height:320px">
-        <canvas id="saPriceChart"></canvas>
-      </div>
-      <div id="saChartStats" style="display:none;margin-top:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px"></div>
-    </div>
-    <div class="s-tab-content" id="saReports"></div>
-    <div class="s-tab-content" id="saOptions">
-      <h2 class="section-title">📈 Options Strategies</h2>
-      <div class="options-card">
-        <select class="strategy-select" id="saStrategySelect" onchange="saUpdateOptionsForm()">
-          <option value="">Select a strategy...</option>
-          <option value="coveredCall">1. Covered Call 📊</option>
-          <option value="cashSecuredPut">2. Cash-Secured Put 💵</option>
-          <option value="protectivePut">3. Protective Put 🛡️</option>
-          <option value="collar">4. Collar 🔒</option>
-          <option value="bullCallSpread">5. Bull Call Spread 📈</option>
-          <option value="bearPutSpread">6. Bear Put Spread 📉</option>
-          <option value="ironCondor">7. Iron Condor 🦅</option>
-          <option value="calendarSpread">8. Calendar Spread 📅</option>
-          <option value="diagonalSpread">9. Diagonal Spread ⚡</option>
-          <option value="longStraddle">10. Long Straddle 🎯</option>
-          <option value="wheel">11. Wheel Strategy 🎡</option>
-        </select>
-        <div id="saOptionsInputs"></div>
-        <button class="calc-btn" id="saCalcBtn" style="display:none" onclick="saCalculateOptions()">🧮 Calculate</button>
-      </div>
-      <div class="result-card" id="saOptionsResult"></div>
-      <div class="pl-chart-wrap" id="saPlChartWrap">
-        <div class="pl-chart-title">📈 P&L at Expiration</div>
-        <canvas id="saPlChart"></canvas>
-        <div class="pl-chart-legend" id="saPlChartLegend"></div>
-      </div>
-    </div>
 
     <!-- Modals -->
     <div class="s-modal" id="saWatchlistModal">
@@ -2727,7 +2592,7 @@ function saDisplayData(data) {
     el.textContent = item.val;
     el.style.cssText = 'font-size:1.2em;font-weight:700;margin-top:2px;display:block';
   });
-  saRenderOverview(data); saRenderValuation(data); saRenderFinancials(data); saRenderAnalysis(data); saRenderReports(data);
+  saRenderOverview(data); saRenderValuation(data); saRenderFinancials(data); saRenderAnalysis(data);
 }
 
 function saGetMetricBadge(type, value) {
@@ -2753,166 +2618,6 @@ function saGetMetricBadge(type, value) {
 function saMC(label, value, badgeType, badgeVal) {
   const badge = badgeType ? saGetMetricBadge(badgeType, badgeVal !== undefined ? badgeVal : parseFloat(value)) : '';
   return `<div class="metric-card"><div class="metric-label" style="display:flex;align-items:center;flex-wrap:wrap;gap:2px">${label}${badge}</div><div class="metric-value">${value}</div></div>`;
-}
-
-// ── Historical price chart ────────────────────────────────────────
-let saPriceChartInstance = null;
-let saPriceChartRange    = '1M';
-
-async function saLoadPriceChart(range) {
-  if (!saCurrentData) return;
-  if (range) saPriceChartRange = range;
-
-  // Update active range button
-  document.querySelectorAll('.sa-range-btn').forEach(b => {
-    b.classList.toggle('active', b.textContent === saPriceChartRange);
-  });
-
-  const key = saGetApiKey();
-  if (!key) {
-    document.getElementById('saChartStatus').textContent = '⚠️ Set Finnhub API key to load chart';
-    return;
-  }
-
-  const statusEl = document.getElementById('saChartStatus');
-  statusEl.textContent = '⏳ Loading price data...';
-
-  // Calculate date range
-  const now     = Math.floor(Date.now() / 1000);
-  const daysSec = 86400;
-  const ranges  = { '1M':30, '3M':90, '6M':180, '1Y':365, '2Y':730, '5Y':1825 };
-  const days    = ranges[saPriceChartRange] || 30;
-  const from    = now - days * daysSec;
-
-  // Choose resolution: weekly for long ranges, daily for short
-  const resolution = days > 365 ? 'W' : days > 90 ? 'D' : 'D';
-
-  try {
-    const res = await fetch(
-      `${FINNHUB}/stock/candle?symbol=${saCurrentData.symbol}&resolution=${resolution}&from=${from}&to=${now}&token=${key}`
-    );
-    const data = await res.json();
-
-    if (!data || data.s === 'no_data' || !data.c || data.c.length === 0) {
-      statusEl.textContent = `No price data available for ${saCurrentData.symbol} on this range.`;
-      return;
-    }
-
-    statusEl.textContent = '';
-
-    // Build chart data
-    const labels = data.t.map(ts => {
-      const d = new Date(ts * 1000);
-      return days <= 90
-        ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-        : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
-    });
-    const closes = data.c;
-    const highs  = data.h;
-    const lows   = data.l;
-
-    const first   = closes[0];
-    const last    = closes[closes.length - 1];
-    const change  = ((last - first) / first * 100);
-    const isUp    = change >= 0;
-    const lineClr = isUp ? '#10b981' : '#ef4444';
-    const fillClr = isUp ? 'rgba(16,185,129,.08)' : 'rgba(239,68,68,.08)';
-
-    // Destroy old chart
-    const existing = Chart.getChart('saPriceChart');
-    if (existing) existing.destroy();
-    saPriceChartInstance = null;
-
-    const ctx = document.getElementById('saPriceChart').getContext('2d');
-    saPriceChartInstance = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [{
-          label:                'Close Price',
-          data:                 closes,
-          borderColor:          lineClr,
-          backgroundColor:      fillClr,
-          fill:                 true,
-          tension:              0.3,
-          pointRadius:          0,
-          pointHoverRadius:     5,
-          pointHoverBackgroundColor: lineClr,
-          borderWidth:          2,
-        }]
-      },
-      options: {
-        responsive:          true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            backgroundColor: 'rgba(13,21,38,.95)',
-            borderColor:     lineClr + '55',
-            borderWidth:      1,
-            titleColor:      '#94a3b8',
-            bodyColor:       '#e2e8f0',
-            padding:          12,
-            callbacks: {
-              title:  items  => items[0].label,
-              label:  item  => ` Close: $${safeNum(item.raw).toFixed(2)}`,
-              afterLabel: (item) => {
-                const i = item.dataIndex;
-                return [
-                  ` High:  $${safeNum(highs[i]).toFixed(2)}`,
-                  ` Low:   $${safeNum(lows[i]).toFixed(2)}`,
-                ];
-              }
-            }
-          }
-        },
-        scales: {
-          x: {
-            ticks: {
-              color: '#64748b',
-              font:  { family:"'DM Mono',monospace", size: 10 },
-              maxTicksLimit: 8,
-              maxRotation: 0,
-            },
-            grid: { color: 'rgba(255,255,255,.04)' },
-          },
-          y: {
-            position: 'right',
-            ticks: {
-              color: '#64748b',
-              font:  { family:"'DM Mono',monospace", size: 10 },
-              callback: v => '$' + safeNum(v).toFixed(2),
-            },
-            grid: { color: 'rgba(255,255,255,.04)' },
-          }
-        }
-      }
-    });
-
-    // Stats bar below chart
-    const periodHigh = Math.max(...highs);
-    const periodLow  = Math.min(...lows);
-    const statsEl    = document.getElementById('saChartStats');
-    if (statsEl) {
-      statsEl.style.display = 'grid';
-      const stat = (label, value, color='#e2e8f0') =>
-        `<div style="background:rgba(255,255,255,.04);border-radius:10px;padding:10px 14px">
-          <div style="font-size:.68rem;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${label}</div>
-          <div style="font-size:.92rem;font-weight:700;color:${color};font-family:'DM Mono',monospace">${value}</div>
-        </div>`;
-      statsEl.innerHTML =
-        stat('Current',      '$' + safeNum(last).toFixed(2)) +
-        stat(`${saPriceChartRange} Change`, (isUp?'+':'') + change.toFixed(2) + '%', lineClr) +
-        stat(`${saPriceChartRange} High`,   '$' + safeNum(periodHigh).toFixed(2), '#10b981') +
-        stat(`${saPriceChartRange} Low`,    '$' + safeNum(periodLow).toFixed(2),  '#ef4444') +
-        stat('Data points',  closes.length + ' candles');
-    }
-
-  } catch(err) {
-    console.error('[saLoadPriceChart]', err);
-    statusEl.textContent = '⚠️ Failed to load chart: ' + err.message;
-  }
 }
 
 function saRenderOverview(data) {
@@ -3509,340 +3214,6 @@ function saRenderAnalysis(data) {
   }
 }
 
-async function saRenderReports(data) {
-  document.getElementById('saReports').innerHTML = '<div style="text-align:center;padding:40px">📄 Loading reports...</div>';
-  try {
-    // Financial statements require Finnhub Premium — show upgrade prompt
-  // Uncomment and use if you have a Premium key:
-  // const response = await fetch(`${FINNHUB}/stock/financials-reported?symbol=${data.symbol}&freq=annual&token=${saGetApiKey()}`);
-  const response = { ok: false, status: 403 };  // Free plan: reports not available
-    if (response.status === 403) { document.getElementById('saReports').innerHTML = `<div class="warning-box"><strong>⚠️ Finnhub Premium Required</strong><p>Financial reports are only available on paid plans.</p><p><a href="https://finnhub.io/pricing" target="_blank" style="color:#3b82f6">Upgrade →</a></p></div>`; return; }
-    const financials = await response.json();
-    let html = '<h2 class="section-title">📄 Financial Reports</h2>';
-    if (financials.income&&financials.income.report) {
-      html += '<div class="valuation-methods"><div class="method-title">💵 Income Statement</div><table class="report-table"><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>';
-      if (financials.income.report.ic) for (let item of financials.income.report.ic.slice(0,15)) html+=`<tr><td>${item.label||item.concept||'—'}</td><td>${item.value?saFormatBigNumber(item.value):'N/A'}</td></tr>`;
-      html += '</tbody></table></div>';
-    }
-    if (!financials.income && !financials.balance) html += '<div class="warning-box"><strong>⚠️ Reports unavailable</strong></div>';
-    document.getElementById('saReports').innerHTML = html;
-  } catch(e) { document.getElementById('saReports').innerHTML = `<div class="warning-box"><strong>⚠️ Error: ${e.message}</strong></div>`; }
-}
-
-// Options Calculator
-const SA_OptionsCalc = {
-  coveredCall:(sp,sh,cs,cp)=>{const pi=cp*sh,cb=sp-cp,mp=((cs-sp)*sh)+pi,ml=(sp-cp)*sh,ric=(mp/(sp*sh))*100,rie=(pi/(sp*sh))*100;return{strategy:'Covered Call',maxProfit:mp,maxLoss:-ml,breakeven:cb,returnIfCalled:ric,returnIfExpires:rie,premiumIncome:pi}},
-  cashSecuredPut:(ps,pp,c=1)=>{const sh=c*100,pi=pp*sh,cr=ps*sh,mp=pi,ml=(ps-pp)*sh,be=ps-pp,rie=(pi/cr)*100;return{strategy:'Cash-Secured Put',maxProfit:mp,maxLoss:-ml,breakeven:be,capitalRequired:cr,returnIfExpires:rie,premiumIncome:pi}},
-  protectivePut:(sp,sh,ps,pp)=>{const pc=pp*sh,ml=((sp-ps)*sh)+pc,be=sp+pp,pl=((sp-ps)/sp)*100,ic=(pc/(sp*sh))*100;return{strategy:'Protective Put',maxProfit:'Unlimited',maxLoss:-ml,breakeven:be,protectionLevel:pl,insuranceCost:ic}},
-  collar:(sp,sh,ps,pp,cs,cp)=>{const nc=(pp-cp)*sh,ml=((sp-ps)*sh)+nc,mp=((cs-sp)*sh)-nc;return{strategy:'Collar',maxProfit:mp,maxLoss:-ml,breakevenLower:ps,breakevenUpper:cs,netCost:nc,protectedRange:`$${ps.toFixed(2)}-$${cs.toFixed(2)}`}},
-  bullCallSpread:(ls,lp,ss,sp,c=1)=>{const sh=c*100,nd=(lp-sp)*sh,mp=((ss-ls)*sh)-nd,ml=nd,be=ls+(lp-sp),rr=mp/ml;return{strategy:'Bull Call Spread',maxProfit:mp,maxLoss:-ml,breakeven:be,netDebit:nd,riskReward:rr}},
-  bearPutSpread:(ls,lp,ss,sp,c=1)=>{const sh=c*100,nd=(lp-sp)*sh,mp=((ls-ss)*sh)-nd,ml=nd,be=ls-(lp-sp),rr=mp/ml;return{strategy:'Bear Put Spread',maxProfit:mp,maxLoss:-ml,breakeven:be,netDebit:nd,riskReward:rr}},
-  ironCondor:(pss,psp,pls,plp,css,csp,cls,clp,c=1)=>{const sh=c*100,nc=((psp-plp)+(csp-clp))*sh,pw=pss-pls,cw=cls-css,ml=(Math.max(pw,cw)*sh)-nc,mp=nc,bel=pss-(nc/sh),beu=css+(nc/sh);return{strategy:'Iron Condor',maxProfit:mp,maxLoss:-ml,breakevenLower:bel,breakevenUpper:beu,netCredit:nc,profitZone:`$${bel.toFixed(2)}-$${beu.toFixed(2)}`}},
-  calendarSpread:(s,np,fp,c=1)=>{const sh=c*100,nd=(fp-np)*sh,ml=nd;return{strategy:'Calendar Spread',maxProfit:nd*0.5,maxLoss:-ml,breakeven:s,netDebit:nd,thetaBenefit:'Positive'}},
-  diagonalSpread:(ns,np,fs,fp,c=1)=>{const sh=c*100,nd=(fp-np)*sh,ml=nd,w=Math.abs(fs-ns);return{strategy:'Diagonal Spread',maxProfit:(w*sh*0.7)-nd,maxLoss:-ml,breakevenRange:`$${Math.min(ns,fs).toFixed(2)}-$${Math.max(ns,fs).toFixed(2)}`,netDebit:nd}},
-  longStraddle:(s,cp,pp,c=1)=>{const sh=c*100,nd=(cp+pp)*sh,beu=s+(cp+pp),bel=s-(cp+pp),mr=((cp+pp)/s)*100;return{strategy:'Long Straddle',maxProfit:'Unlimited',maxLoss:-nd,breakevenLower:bel,breakevenUpper:beu,netDebit:nd,moveRequired:mr}},
-  wheel:(sp,ps,pp,cs,cp,c=1)=>{const sh=c*100,pi=pp*sh,cr=ps*sh,ci=cp*sh,ti=pi+ci,mp=((cs-(ps-pp))*sh)+ti,ml=(ps-pp)*sh,roc=(ti/cr)*100;return{strategy:'Wheel Strategy',maxProfit:mp,maxLoss:-ml,breakeven:ps-pp-cp,totalIncome:ti,returnOnCapital:roc,capitalRequired:cr,description:`Sell ${ps}P → if assigned → Sell ${cs}C`}}
-};
-
-function saUpdateOptionsForm() {
-  const s = document.getElementById('saStrategySelect').value;
-  let html = '';
-  const inp = (id,label,val,ph) => `<div class="input-group"><label class="input-label">${label}</label><input class="input-field" type="number" id="saOpt${id}" value="${val||''}" placeholder="${ph||''}"></div>`;
-  if(s==='coveredCall')html=`<div class="input-grid">${inp(1,'Stock Price ($)',100)}${inp(2,'Shares',100)}${inp(3,'Call Strike ($)',105)}${inp(4,'Call Premium ($)',2.5)}</div>`;
-  else if(s==='cashSecuredPut')html=`<div class="input-grid">${inp(1,'Put Strike ($)',95)}${inp(2,'Put Premium ($)',2.0)}${inp(3,'Contracts',1)}</div>`;
-  else if(s==='protectivePut')html=`<div class="input-grid">${inp(1,'Stock Price ($)',100)}${inp(2,'Shares',100)}${inp(3,'Put Strike ($)',95)}${inp(4,'Put Premium ($)',1.5)}</div>`;
-  else if(s==='collar')html=`<div class="input-grid">${inp(1,'Stock Price ($)',100)}${inp(2,'Shares',100)}${inp(3,'Put Strike ($)',95)}${inp(4,'Put Premium ($)',1.5)}${inp(5,'Call Strike ($)',105)}${inp(6,'Call Premium ($)',2.0)}</div>`;
-  else if(s==='bullCallSpread')html=`<div class="input-grid">${inp(1,'Long Strike ($)',100)}${inp(2,'Long Premium ($)',5.0)}${inp(3,'Short Strike ($)',105)}${inp(4,'Short Premium ($)',2.5)}${inp(5,'Contracts',1)}</div>`;
-  else if(s==='bearPutSpread')html=`<div class="input-grid">${inp(1,'Long Strike ($)',95)}${inp(2,'Long Premium ($)',5.0)}${inp(3,'Short Strike ($)',100)}${inp(4,'Short Premium ($)',2.5)}${inp(5,'Contracts',1)}</div>`;
-  else if(s==='ironCondor')html=`<div class="input-grid">${inp(1,'Put Short Strike',95)}${inp(2,'Put Short Prem',2.0)}${inp(3,'Put Long Strike',90)}${inp(4,'Put Long Prem',0.5)}${inp(5,'Call Short Strike',105)}${inp(6,'Call Short Prem',2.0)}${inp(7,'Call Long Strike',110)}${inp(8,'Call Long Prem',0.5)}${inp(9,'Contracts',1)}</div>`;
-  else if(s==='calendarSpread')html=`<div class="input-grid">${inp(1,'Strike ($)',100)}${inp(2,'Near Premium ($)',3.0)}${inp(3,'Far Premium ($)',5.0)}${inp(4,'Contracts',1)}</div>`;
-  else if(s==='diagonalSpread')html=`<div class="input-grid">${inp(1,'Near Strike ($)',100)}${inp(2,'Near Premium ($)',3.0)}${inp(3,'Far Strike ($)',105)}${inp(4,'Far Premium ($)',5.0)}${inp(5,'Contracts',1)}</div>`;
-  else if(s==='longStraddle')html=`<div class="input-grid">${inp(1,'Strike ($)',100)}${inp(2,'Call Premium ($)',5.0)}${inp(3,'Put Premium ($)',5.0)}${inp(4,'Contracts',1)}</div>`;
-  else if(s==='wheel')html=`<div class="input-grid">${inp(1,'Stock Price ($)',100)}${inp(2,'Put Strike ($)',95)}${inp(3,'Put Premium ($)',2.0)}${inp(4,'Call Strike ($)',105)}${inp(5,'Call Premium ($)',2.5)}${inp(6,'Contracts',1)}</div>`;
-  document.getElementById('saOptionsInputs').innerHTML = html;
-  document.getElementById('saCalcBtn').style.display = s ? 'block' : 'none';
-  document.getElementById('saOptionsResult').style.display = 'none';
-  document.getElementById('saPlChartWrap').style.display = 'none';
-  const existingChart = Chart.getChart('saPlChart');
-  if (existingChart) existingChart.destroy();
-}
-
-// ── P&L calculation at expiration for each strategy ─────────────
-// Returns profit/loss in $ for a given stock price at expiration.
-function saPlAtPrice(strategy, v, price) {
-  const p = price;
-  switch(strategy) {
-    case 'coveredCall': {
-      // Long stock + short call
-      // Stock P&L: (p - v(1)) * v(2)
-      // Call premium received: v(4) * v(2)
-      // If p > strike: capped at strike
-      const stockPL  = (Math.min(p, v(3)) - v(1)) * v(2);
-      const premium  = v(4) * v(2);
-      return stockPL + premium;
-    }
-    case 'cashSecuredPut': {
-      // Short put: keep premium if p >= strike, else lose (strike-p)*shares
-      const sh = (v(3)||1) * 100;
-      return p >= v(1) ? v(2)*sh : (p - v(1) + v(2)) * sh;
-    }
-    case 'protectivePut': {
-      // Long stock + long put
-      const stockPL = (p - v(1)) * v(2);
-      const putPL   = p < v(3) ? (v(3) - p - v(4)) * v(2) : -v(4) * v(2);
-      return stockPL + putPL;
-    }
-    case 'collar': {
-      // Long stock + long put + short call
-      const sh = v(2);
-      const stockPL = (Math.min(Math.max(p, v(3)), v(5)) - v(1)) * sh;
-      const netPrem = (v(6) - v(4)) * sh;
-      return stockPL + netPrem;
-    }
-    case 'bullCallSpread': {
-      const sh = (v(5)||1) * 100;
-      const longPL  = Math.max(p - v(1), 0) * sh;
-      const shortPL = -Math.max(p - v(3), 0) * sh;
-      const cost    = (v(2) - v(4)) * sh;
-      return longPL + shortPL - cost;
-    }
-    case 'bearPutSpread': {
-      const sh = (v(5)||1) * 100;
-      const longPL  = Math.max(v(1) - p, 0) * sh;
-      const shortPL = -Math.max(v(3) - p, 0) * sh;
-      const cost    = (v(2) - v(4)) * sh;
-      return longPL + shortPL - cost;
-    }
-    case 'ironCondor': {
-      const sh = (v(9)||1) * 100;
-      const nc = ((v(2)-v(4)) + (v(6)-v(8))) * sh;
-      const putLeg  = Math.max(v(3)-p,0) - Math.max(v(1)-p,0);
-      const callLeg = Math.max(p-v(7),0) - Math.max(p-v(5),0);
-      return nc - (putLeg + callLeg) * sh;
-    }
-    case 'calendarSpread': {
-      // Simplified: max profit near strike, cost is net debit
-      const sh = (v(4)||1) * 100, nd = (v(3)-v(2))*sh;
-      const dist = Math.abs(p - v(1));
-      return Math.max(-nd, nd * 0.5 * Math.exp(-dist*dist/(2*v(1)*v(1)*0.01)) - nd);
-    }
-    case 'diagonalSpread': {
-      const sh = (v(5)||1) * 100, nd = (v(4)-v(2))*sh;
-      const intrinsic = Math.max(0, p - v(1)) - Math.max(0, p - v(3));
-      return intrinsic * sh - nd;
-    }
-    case 'longStraddle': {
-      const sh = (v(4)||1) * 100;
-      const cost = (v(2)+v(3))*sh;
-      return (Math.abs(p - v(1)) * sh) - cost;
-    }
-    case 'wheel': {
-      const sh = (v(6)||1)*100;
-      if (p >= v(2)) return (v(3)+v(5))*sh;                // put expires, keep premium
-      if (p >= v(2)-v(3)) return (p-(v(2)-v(3)))*sh;       // assigned, partial recovery
-      return (p - v(2) + v(3)) * sh;                         // deep loss
-    }
-    default: return 0;
-  }
-}
-
-let saPlChartInstance = null;
-
-function saCalculateOptions() {
-  try {
-  const s = document.getElementById('saStrategySelect').value;
-  const v = id => parseFloat(document.getElementById('saOpt'+id)?.value) || 0;
-  const calc = SA_OptionsCalc;
-  let r;
-  if(s==='coveredCall')r=calc.coveredCall(v(1),v(2),v(3),v(4));
-  else if(s==='cashSecuredPut')r=calc.cashSecuredPut(v(1),v(2),v(3));
-  else if(s==='protectivePut')r=calc.protectivePut(v(1),v(2),v(3),v(4));
-  else if(s==='collar')r=calc.collar(v(1),v(2),v(3),v(4),v(5),v(6));
-  else if(s==='bullCallSpread')r=calc.bullCallSpread(v(1),v(2),v(3),v(4),v(5));
-  else if(s==='bearPutSpread')r=calc.bearPutSpread(v(1),v(2),v(3),v(4),v(5));
-  else if(s==='ironCondor')r=calc.ironCondor(v(1),v(2),v(3),v(4),v(5),v(6),v(7),v(8),v(9));
-  else if(s==='calendarSpread')r=calc.calendarSpread(v(1),v(2),v(3),v(4));
-  else if(s==='diagonalSpread')r=calc.diagonalSpread(v(1),v(2),v(3),v(4),v(5));
-  else if(s==='longStraddle')r=calc.longStraddle(v(1),v(2),v(3),v(4));
-  else if(s==='wheel')r=calc.wheel(v(1),v(2),v(3),v(4),v(5),v(6));
-  if (!r) return;
-
-  // ── Results panel ──────────────────────────────────────────────
-  let html = `<div class="result-title">${r.strategy}</div><div class="result-grid">`;
-  const ri = (label,val) => `<div class="result-item"><div class="result-label">${label}</div><div class="result-value">${val}</div></div>`;
-  html += ri('Max Profit', typeof r.maxProfit==='number'?'$'+r.maxProfit.toFixed(2):r.maxProfit);
-  html += ri('Max Loss',   typeof r.maxLoss==='number'?'$'+r.maxLoss.toFixed(2):r.maxLoss);
-  if (r.breakeven)       html += ri('Breakeven',        '$'+r.breakeven.toFixed(2));
-  if (r.breakevenLower)  html += ri('Breakeven Lower',  '$'+r.breakevenLower.toFixed(2));
-  if (r.breakevenUpper)  html += ri('Breakeven Upper',  '$'+r.breakevenUpper.toFixed(2));
-  if (r.returnIfCalled)  html += ri('Return if Called', r.returnIfCalled.toFixed(2)+'%');
-  if (r.returnIfExpires) html += ri('Return if Expires',r.returnIfExpires.toFixed(2)+'%');
-  if (r.returnOnCapital) html += ri('Return on Capital',r.returnOnCapital.toFixed(2)+'%');
-  if (r.riskReward)      html += ri('Risk/Reward',      r.riskReward.toFixed(2)+':1');
-  if (r.protectedRange)  html += ri('Protected Range',  r.protectedRange);
-  if (r.profitZone)      html += ri('Profit Zone',      r.profitZone);
-  if (r.totalIncome)     html += ri('Total Income',     '$'+r.totalIncome.toFixed(2));
-  if (r.capitalRequired) html += ri('Capital Required', '$'+r.capitalRequired.toFixed(2));
-  if (r.description)     html += ri('Description',      r.description);
-  html += '</div>';
-  const el = document.getElementById('saOptionsResult');
-  el.innerHTML = html;
-  el.style.display = 'block';
-
-  // ── P&L Chart ──────────────────────────────────────────────────
-  // Determine reference price (the "centre" of the chart)
-  const refPrice = v(1) || 100;
-
-  // Build 80 price points from 60% to 140% of reference price
-  const POINTS  = 80;
-  const minP    = refPrice * 0.60;
-  const maxP    = refPrice * 1.40;
-  const step    = (maxP - minP) / (POINTS - 1);
-  const prices  = Array.from({length: POINTS}, (_, i) => minP + i * step);
-  const plData  = prices.map(p => saPlAtPrice(s, v, p));
-
-  // Split into profit (green) and loss (red) datasets for fill colouring
-  const profitData = plData.map(pl => pl >= 0 ? pl : null);
-  const lossData   = plData.map(pl => pl <  0 ? pl : null);
-  const zeroLine   = plData.map(() => 0);
-
-  // Find breakevens for annotation (where P&L crosses zero)
-  const bePoints = [];
-  for (let i = 1; i < plData.length; i++) {
-    if ((plData[i-1] < 0 && plData[i] >= 0) || (plData[i-1] >= 0 && plData[i] < 0)) {
-      const x = prices[i-1] + (prices[i]-prices[i-1]) * Math.abs(plData[i-1]) /
-                (Math.abs(plData[i-1]) + Math.abs(plData[i]));
-      bePoints.push(x);
-    }
-  }
-
-  // Current stock price annotation
-  const currentPrice = saCurrentData ? safeNum(saCurrentData.price) : 0;
-
-  // Destroy old chart safely
-  const existing = Chart.getChart('saPlChart');
-  if (existing) existing.destroy();
-  saPlChartInstance = null;
-
-  const ctx = document.getElementById('saPlChart').getContext('2d');
-  saPlChartInstance = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: prices.map(p => '$' + p.toFixed(0)),
-      datasets: [
-        {
-          label: 'Profit',
-          data: profitData,
-          borderColor: '#10b981',
-          backgroundColor: 'rgba(16,185,129,.18)',
-          fill: true,
-          tension: 0.3,
-          pointRadius: 0,
-          borderWidth: 2.5,
-          spanGaps: false,
-        },
-        {
-          label: 'Loss',
-          data: lossData,
-          borderColor: '#ef4444',
-          backgroundColor: 'rgba(239,68,68,.18)',
-          fill: true,
-          tension: 0.3,
-          pointRadius: 0,
-          borderWidth: 2.5,
-          spanGaps: false,
-        },
-        {
-          label: 'Zero',
-          data: zeroLine,
-          borderColor: 'rgba(100,116,139,.5)',
-          backgroundColor: 'transparent',
-          borderDash: [4, 4],
-          fill: false,
-          pointRadius: 0,
-          borderWidth: 1,
-        },
-      ]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: 'rgba(13,21,38,.95)',
-          borderColor: 'rgba(100,116,139,.3)',
-          borderWidth: 1,
-          titleColor: '#94a3b8',
-          bodyColor: '#e2e8f0',
-          padding: 12,
-          callbacks: {
-            title: items => 'Price: ' + items[0].label,
-            label: item => {
-              if (item.dataset.label === 'Zero') return null;
-              const val = item.raw;
-              if (val === null || val === undefined) return null;
-              return ` P&L: ${val >= 0 ? '+' : ''}$${val.toFixed(2)}`;
-            },
-            filter: item => item.dataset.label !== 'Zero',
-          }
-        }
-      },
-      scales: {
-        x: {
-          ticks: {
-            color: '#64748b',
-            font: { family: "'DM Mono',monospace", size: 10 },
-            maxTicksLimit: 8,
-            maxRotation: 0,
-          },
-          grid: { color: 'rgba(255,255,255,.04)' },
-        },
-        y: {
-          ticks: {
-            color: '#64748b',
-            font: { family: "'DM Mono',monospace", size: 10 },
-            callback: v => (v >= 0 ? '+' : '') + '$' + v.toFixed(0),
-          },
-          grid: { color: 'rgba(255,255,255,.04)' },
-        }
-      }
-    }
-  });
-
-  // ── Legend ────────────────────────────────────────────────────
-  let legendHtml = `
-    <div class="pl-chart-legend-item">
-      <div class="pl-chart-legend-dot" style="background:#10b981"></div> Profit
-    </div>
-    <div class="pl-chart-legend-item">
-      <div class="pl-chart-legend-dot" style="background:#ef4444"></div> Loss
-    </div>`;
-  if (bePoints.length) {
-    legendHtml += bePoints.map(be =>
-      `<div class="pl-chart-legend-item">
-        <div class="pl-chart-legend-dot" style="background:#f59e0b"></div>
-        Breakeven ≈ $${be.toFixed(2)}
-       </div>`
-    ).join('');
-  }
-  if (currentPrice > minP && currentPrice < maxP) {
-    legendHtml += `<div class="pl-chart-legend-item">
-      <div class="pl-chart-legend-dot" style="background:#60a5fa"></div>
-      Current price: $${currentPrice.toFixed(2)}
-    </div>`;
-  }
-  document.getElementById('saPlChartLegend').innerHTML = legendHtml;
-  document.getElementById('saPlChartWrap').style.display = 'block';
-
-  }
-  catch(e) {
-    console.error('[saCalculateOptions]', e);
-    showError('saOptionsResult', e.message || String(e));
-  }
-}
-
 function saSwitchTab(tabId, btn) {
   document.querySelectorAll('#page-stock .s-tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('#page-stock .s-tab-content').forEach(t => t.classList.remove('active'));
@@ -4189,7 +3560,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Service Worker registration ───────────────────────────────
 // Bump APP_VERSION AND CACHE_NAME in sw.js together on every deploy.
 // The version check below clears old caches immediately on load.
-const APP_VERSION = '1.6.1';
+const APP_VERSION = '1.7';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {

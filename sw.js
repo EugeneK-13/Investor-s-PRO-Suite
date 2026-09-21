@@ -1,8 +1,8 @@
-// sw.js — InvCalc Pro Suite v1.6.1
+// sw.js — InvCalc Pro Suite v1.7
 // GitHub Pages: https://eugenek-13.github.io/Investor-s-PRO-Suite/
 // HOW TO UPDATE: bump CACHE_NAME here AND APP_VERSION in index.html together.
 
-const CACHE_NAME = 'invcalc-v1.6.1';
+const CACHE_NAME = 'invcalc-v1.7';
 const BASE = '/Investor-s-PRO-Suite/';
 
 const PRECACHE_ASSETS = [
