@@ -1084,6 +1084,36 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
         </div>
       </div>
     </div>
+    <!-- Valuation Assumptions (CAPM inputs) -->
+    <div class="api-key-section" id="saAssumptionsSection">
+      <div class="api-key-card" id="saAssumptionsCard" style="border-color:rgba(255,255,255,.1);background:rgba(255,255,255,.04)">
+        <div class="api-key-header" onclick="saToggleAssumptionsPanel()">
+          <div class="api-key-status">
+            <div class="api-key-dot" id="saAssumptionsDot" style="background:#60a5fa;box-shadow:0 0 6px rgba(96,165,250,.6)"></div>
+            <span id="saAssumptionsStatusText">Valuation assumptions: default</span>
+          </div>
+          <button class="api-key-toggle" id="saAssumptionsToggleBtn">⚙ Adjust</button>
+        </div>
+        <div class="api-key-body" id="saAssumptionsBody">
+          <div class="api-key-row" style="flex-wrap:wrap">
+            <div class="form-group" style="flex:1;min-width:160px">
+              <label style="display:block;font-size:.72rem;color:#94a3b8;margin-bottom:5px">Risk-Free Rate (%)</label>
+              <input type="number" id="saRiskFreeInput" class="api-key-input" style="font-family:inherit;letter-spacing:normal" step="0.05" min="0" max="15" placeholder="4.0">
+            </div>
+            <div class="form-group" style="flex:1;min-width:160px">
+              <label style="display:block;font-size:.72rem;color:#94a3b8;margin-bottom:5px">Equity Risk Premium (%)</label>
+              <input type="number" id="saErpInput" class="api-key-input" style="font-family:inherit;letter-spacing:normal" step="0.05" min="0" max="15" placeholder="5.5">
+            </div>
+            <button class="api-key-save" onclick="saSaveAssumptions()">Save</button>
+            <button class="api-key-clear" onclick="saResetAssumptions()" title="Reset to default (4.0% / 5.5%)">↺ Reset</button>
+          </div>
+          <div class="api-key-hint">
+            Used to compute WACC (discount rate) for every DCF-based method across the app — Stock Analyzer, Legendary Investors' Buffett DCF, and Reverse DCF: <span style="font-family:'DM Mono',monospace">WACC = Risk-Free + Beta × ERP</span>.
+            Risk-free rate normally tracks the 10-year Treasury yield — update it here after a meaningful Fed move instead of editing code. Stored only in your browser.
+          </div>
+        </div>
+      </div>
+    </div>
     <div class="search-card">
       <div class="search-title">Search by ticker</div>
       <div class="search-form">
@@ -1471,6 +1501,7 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
                 <div class="li-form-group"><label>EPS Growth 10yr (%)</label><input type="number" id="li_b_growth" value="12" step="0.5"></div>
                 <div class="li-form-group"><label>Earnings Stability (1–10)</label><input type="number" id="li_b_stability" value="8" min="1" max="10"></div>
                 <div class="li-form-group"><label>D/E Ratio</label><input type="number" id="li_b_de" value="0.3" step="0.1"><small>Buffett: &lt;0.5</small></div>
+                <div class="li-form-group"><label>Beta</label><input type="number" id="li_b_beta" value="1.0" step="0.05" min="0"><small>Used for DCF discount rate (CAPM)</small></div>
                 <div class="li-form-group"><label>FCF per Share ($)</label><input type="number" id="li_b_fcf" value="7.5" step="0.1"></div>
                 <div class="li-form-group"><label>Dividends per Share ($)</label><input type="number" id="li_b_div" value="2.0" step="0.01"></div>
                 <div class="li-form-group"><label>Moat Score (1–5)</label><input type="number" id="li_b_moat" value="4" min="1" max="5"><small>5 = wide moat</small></div>
@@ -1737,8 +1768,8 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
             </div>
             <div>
               <div class="fv-form-group"><label>Market Cap ($M)</label><input type="number" id="fv_m_mcap" value="800000" step="1000"></div>
-              <div class="fv-form-group"><label>Debt ($M)</label><input type="number" id="fv_m_debt" value="5000" step="1000"></div>
-              <div class="fv-form-group"><label>Cash ($M)</label><input type="number" id="fv_m_cash" value="20000" step="1000"></div>
+              <div class="fv-form-group"><label>Debt ($M)</label><input type="number" id="fv_m_debt" value="5000" step="1000"><small>Auto-filled is an approximation (book value × D/E) — verify against the 10-K</small></div>
+              <div class="fv-form-group"><label>Cash ($M)</label><input type="number" id="fv_m_cash" value="20000" step="1000"><small>Not available from Finnhub's Free plan — enter manually</small></div>
               <div class="fv-form-group"><label>EBITDA ($M)</label><input type="number" id="fv_m_ebitda" value="12000" step="1000"></div>
             </div>
           </div>
@@ -2275,6 +2306,7 @@ function liBridgeLoad(inv) {
       bSet('li_b_roe', d.roe); bSet('li_b_roic', d.roic); bSet('li_b_growth', grow);
       bSet('li_b_book', d.bookValue); bSet('li_b_de', d.debtToEquity);
       bSet('li_b_fcf', d.freeCashFlowPerShare); bSet('li_b_div', d.dividendPerShare);
+      bSet('li_b_beta', d.beta);
     },
     graham: () => {
       bSet('li_g_price', d.price); bSet('li_g_eps', epsAbs); bSetStr('li_g_name', d.name);
@@ -2326,6 +2358,36 @@ function fvBridgeLoad() {
   // Multiples tab
   bSet('fv_m_price', d.price); bSet('fv_m_eps', epsAbs);
   if (d.bookValue) bSet('fv_m_book', d.bookValue);
+  if (d.revenuePerShare) bSet('fv_m_sales', d.revenuePerShare);
+  // Market cap / debt / EBITDA — previously the only Fair Value tab that
+  // required 10+ raw fields typed in by hand (mcap, debt, cash, EBITDA),
+  // which risked drifting out of sync with the rest of the tab's bridged
+  // fields. Fill what Finnhub actually gives us on the Free plan:
+  //  - Market Cap: reported directly.
+  //  - EBITDA ($M): back out from marketCap / EV-to-EBITDA when that ratio
+  //    is available (same approach saRenderFinancials already uses).
+  //  - Debt ($M): approximated from book value × shares × D/E, same
+  //    approximation Stock Analyzer's own EV/EBITDA fallback uses — this is
+  //    not a reported figure, so treat it as directional, not exact.
+  //  - Cash: not available on the Free plan; left at 0 rather than guessed.
+  if (d.marketCap > 0) bSet('fv_m_mcap', Math.round(d.marketCap / 1e6));
+  if (d.marketCap > 0 && d.evToEbitda > 0) {
+    bSet('fv_m_ebitda', Math.round((d.marketCap / d.evToEbitda) / 1e6));
+  }
+  if (d.bookValue > 0 && d.sharesOutstanding > 0 && d.debtToEquity >= 0) {
+    const debtApproxM = Math.round((d.bookValue * d.sharesOutstanding * d.debtToEquity) / 1e6);
+    if (debtApproxM > 0) bSet('fv_m_debt', debtApproxM);
+  }
+  // Prefill "sector average" fields from the same sector-multiple tables
+  // Stock Analyzer's own valuation engine uses, instead of leaving generic
+  // hardcoded defaults (35x P/E, 20x EV/EBITDA) that don't reflect the
+  // loaded company's actual sector.
+  if (d.sector) {
+    bSet('fv_m_spe', SA_SECTOR_PE[d.sector] || SA_SECTOR_PE_DEFAULT);
+    bSet('fv_m_spb', SA_SECTOR_PB[d.sector] || SA_SECTOR_PB_DEFAULT);
+    bSet('fv_m_sps', SA_SECTOR_PS[d.sector] || SA_SECTOR_PS_DEFAULT);
+    bSet('fv_m_sev', SA_SECTOR_EV_EBITDA[d.sector] || SA_SECTOR_DEFAULT_EV_EBITDA);
+  }
   fvSwitchMethod('combined');
   // Auto-calculate Combined Analysis after all fields are set
   setTimeout(fvCalculateCombined, 150);
@@ -2431,6 +2493,60 @@ function saClearApiKey() {
   if (body) body.classList.add('open');
   saShowNotification('API key removed');
 }
+
+// ── Valuation Assumptions UI (Risk-Free Rate / ERP) ────────────────
+function saLoadAssumptions() {
+  SA_RISK_FREE = saReadStoredAssumption('sa_risk_free', SA_RISK_FREE_DEFAULT);
+  SA_ERP       = saReadStoredAssumption('sa_erp', SA_ERP_DEFAULT);
+}
+
+function saInitAssumptionsUI() {
+  saLoadAssumptions();
+  const dot  = document.getElementById('saAssumptionsDot');
+  const text = document.getElementById('saAssumptionsStatusText');
+  const rfInput  = document.getElementById('saRiskFreeInput');
+  const erpInput = document.getElementById('saErpInput');
+  if (!text) return;
+  const isCustom = SA_RISK_FREE !== SA_RISK_FREE_DEFAULT || SA_ERP !== SA_ERP_DEFAULT;
+  text.textContent = isCustom
+    ? `Valuation assumptions: custom (RF ${(SA_RISK_FREE*100).toFixed(2)}% · ERP ${(SA_ERP*100).toFixed(2)}%)`
+    : `Valuation assumptions: default (RF ${(SA_RISK_FREE_DEFAULT*100).toFixed(1)}% · ERP ${(SA_ERP_DEFAULT*100).toFixed(1)}%)`;
+  if (dot) dot.style.background = isCustom ? '#f59e0b' : '#60a5fa';
+  if (rfInput)  rfInput.value  = (SA_RISK_FREE * 100).toFixed(2);
+  if (erpInput) erpInput.value = (SA_ERP * 100).toFixed(2);
+}
+
+function saToggleAssumptionsPanel() {
+  const body = document.getElementById('saAssumptionsBody');
+  if (!body) return;
+  body.classList.toggle('open');
+}
+
+function saSaveAssumptions() {
+  const rfInput  = document.getElementById('saRiskFreeInput');
+  const erpInput = document.getElementById('saErpInput');
+  const rf  = parseFloat(rfInput  ? rfInput.value  : NaN) / 100;
+  const erp = parseFloat(erpInput ? erpInput.value : NaN) / 100;
+  if (!isFinite(rf) || rf < 0 || rf > 0.15) {
+    validateField('saRiskFreeInput', false, 'Enter a rate between 0% and 15%');
+    return;
+  }
+  if (!isFinite(erp) || erp < 0 || erp > 0.15) {
+    validateField('saErpInput', false, 'Enter a rate between 0% and 15%');
+    return;
+  }
+  localStorage.setItem('sa_risk_free', rf);
+  localStorage.setItem('sa_erp', erp);
+  saInitAssumptionsUI();
+  saShowNotification('✓ Valuation assumptions saved — recalculate to apply');
+}
+
+function saResetAssumptions() {
+  localStorage.removeItem('sa_risk_free');
+  localStorage.removeItem('sa_erp');
+  saInitAssumptionsUI();
+  saShowNotification('Valuation assumptions reset to default');
+}
 let saCurrentData = null;
 let saWatchlist = JSON.parse(localStorage.getItem('watchlist') || '[]');
 let saHistory   = JSON.parse(localStorage.getItem('history')   || '[]');
@@ -2444,7 +2560,7 @@ const SA_METHOD_TOOLTIPS = {
   peg:       { title:'PEG Ratio',         formula:'Price / (P/E / Growth, capped at 60%)', desc:'Uses EPS growth when positive, otherwise revenue growth (EPS growth is often negative/unusable right after a loss-to-profit swing)' },
   dcf:       { title:'DCF (5yr, 2-stage)',formula:'Σ(FCF/(1+WACC)^t)+Terminal', desc:'WACC estimated via CAPM (risk-free + β×premium). Growth tapers to 3% terminal over 5 years.' },
   ddm:       { title:'Dividend Discount', formula:'D×(1+g)/(r-g)',              desc:"Gordon Model for dividend stocks. Needs an actual dividend." },
-  evEbitda:  { title:'EV/EBITDA',         formula:'Price × (Sector/Current)',   desc:'3-tier fallback: Finnhub ratio → computed from EV & reported EBITDA → approximated from operating margin if no EBITDA figure exists at all' },
+  evEbitda:  { title:'EV/EBITDA',         formula:'Price × (Growth-Adj. Sector Target/Current)', desc:'3-tier fallback: Finnhub ratio → computed from EV & reported EBITDA → approximated from operating margin if no EBITDA figure exists at all. Sector target multiple is scaled by revenue growth (0.85×–1.35×) so a mature and a hyper-growth name in the same sector aren\'t valued at the same multiple.' },
   ps:        { title:'Price/Sales',       formula:'Revenue × Target P/S',       desc:'Revenue-based valuation' }
 };
 
@@ -2711,11 +2827,61 @@ function saRenderValuation(data) {
     ? `<div style="margin-top:10px;padding:8px 12px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);border-radius:8px;color:#fbbf24;font-size:.78em">⚠️ High spread between methods (${val.dispersion.ratio.toFixed(1)}× between min $${val.dispersion.min.toFixed(2)} and max $${val.dispersion.max.toFixed(2)}) — treat the weighted average with caution.</div>`
     : '';
 
+  // Conservative Fair Value / Margin of Safety — a value-investing style
+  // sanity check that looks at the WORST surviving method instead of the
+  // weighted average. A conservative buyer cares less about "what's the
+  // blended estimate" and more about "how bad is my downside if the most
+  // pessimistic method turns out to be right".
+  const price = safeNum(data.price);
+  const mosHtml = (val.dispersion && price > 0)
+    ? (() => {
+        const conservative = val.dispersion.min;
+        const mos = ((conservative - price) / price) * 100; // negative = price above even the lowest method
+        const mosColor = mos > 20 ? '#10b981' : mos > 0 ? '#fbbf24' : '#ef4444';
+        const mosLabel = mos > 20 ? 'Strong margin of safety' : mos > 0 ? 'Thin margin of safety' : 'No margin of safety at current price';
+        return `<div style="margin-top:10px;padding:10px 14px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:10px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px">
+            <span style="font-size:.78em;color:#94a3b8">🛡️ Conservative Fair Value <span style="opacity:.7">(lowest surviving method)</span></span>
+            <span style="font-weight:700;font-family:'DM Mono',monospace">$${conservative.toFixed(2)}</span>
+          </div>
+          <div style="margin-top:4px;font-size:.78em;color:${mosColor}">Margin of Safety: ${mos>0?'+':''}${mos.toFixed(1)}% — ${mosLabel}</div>
+        </div>`;
+      })()
+    : '';
+
   const reverseDcfHtml = (val.impliedGrowth !== null && isFinite(val.impliedGrowth))
-    ? `<div style="margin-top:14px;padding:12px 14px;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.25);border-radius:10px">
+    ? (() => {
+        const implied = val.impliedGrowth * 100;
+        // Recent actual growth for comparison — Finnhub's free plan only gives
+        // TTM YoY figures, not a multi-year historical series, so this is
+        // labeled "recent" rather than claiming a 5-year CAGR we don't have.
+        const epsG = safeNum(data.epsGrowth);
+        const revG = safeNum(data.revenueGrowth);
+        const actual = epsG > 0 ? epsG : (revG > 0 ? revG : null);
+        const actualLabel = epsG > 0 ? 'EPS growth (TTM YoY)' : (revG > 0 ? 'revenue growth (TTM YoY, EPS growth unusable)' : null);
+        let compareHtml = '';
+        if (actual !== null) {
+          const gap = implied - actual;
+          const gapColor = Math.abs(gap) < 5 ? '#10b981' : Math.abs(gap) < 15 ? '#fbbf24' : '#ef4444';
+          const verdict = gap > 15
+            ? 'The market is pricing in meaningfully faster growth than the company has recently delivered — a demanding bar to keep clearing.'
+            : gap > 5
+            ? 'The market is pricing in somewhat faster growth than recent actuals — a moderately optimistic bar.'
+            : gap < -15
+            ? 'The market is pricing in meaningfully slower growth than recent actuals — the price may already reflect pessimism, or recent growth may not be sustainable.'
+            : gap < -5
+            ? 'The market is pricing in somewhat slower growth than recent actuals — a conservative bar.'
+            : 'Implied growth is roughly in line with recent actual growth — the price isn\'t pricing in a major acceleration or deceleration.';
+          compareHtml = `<div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.08);font-size:.82em;color:#cbd5e1;line-height:1.6">
+            vs. recent ${actualLabel}: <strong style="color:#e2e8f0">${actual.toFixed(1)}%</strong> — gap of <strong style="color:${gapColor}">${gap>0?'+':''}${gap.toFixed(1)} pts</strong>.<br>${verdict}
+          </div>`;
+        }
+        return `<div style="margin-top:14px;padding:12px 14px;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.25);border-radius:10px">
         <div style="font-weight:700;font-size:.85em;margin-bottom:4px;color:#93c5fd">🔄 Reverse DCF</div>
-        <div style="font-size:.82em;color:#cbd5e1;line-height:1.6">At the current price, the market is pricing in <strong>${(val.impliedGrowth*100).toFixed(1)}%</strong> annual FCF growth (WACC ${(val.wacc*100).toFixed(1)}%, 3% terminal growth). Compare that to the company's actual growth trend to judge whether the price is reasonable.</div>
-      </div>`
+        <div style="font-size:.82em;color:#cbd5e1;line-height:1.6">At the current price, the market is pricing in <strong>${implied.toFixed(1)}%</strong> annual FCF growth (WACC ${(val.wacc*100).toFixed(1)}%, 3% terminal growth).</div>
+        ${compareHtml}
+      </div>`;
+      })()
     : '';
 
   document.getElementById('saValuation').innerHTML = `
@@ -2725,6 +2891,7 @@ function saRenderValuation(data) {
       <div class="potential">Upside: ${val.potential>0?'+':''}${safeNum(val.potential).toFixed(1)}%</div>
       <div>${rec}</div>
     </div>
+    ${mosHtml}
     <div class="valuation-methods">
       <div class="method-title">💎 All Methods (${val.validVals.length} of 8 used)</div>
       <div class="method-row" onmouseenter=\"saShowMethodTooltip('graham')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>1. Graham Number ℹ️</span>${saMethodCell(val,'graham','graham')}</div>
@@ -2733,11 +2900,12 @@ function saRenderValuation(data) {
       <div class="method-row" onmouseenter=\"saShowMethodTooltip('peg')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>4. PEG ℹ️</span>${saMethodCell(val,'pegVal','peg')}</div>
       <div class="method-row" onmouseenter=\"saShowMethodTooltip('dcf')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>5. DCF ℹ️</span>${saMethodCell(val,'dcfVal','dcf')}</div>
       <div class="method-row" onmouseenter=\"saShowMethodTooltip('ddm')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>6. DDM ℹ️</span>${saMethodCell(val,'ddmVal','ddm')}</div>
-      <div class="method-row" onmouseenter=\"saShowMethodTooltip('evEbitda')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>7. EV/EBITDA ℹ️</span>${saMethodCell(val,'evEbitdaVal','evEbitda')}</div>
+      <div class="method-row" onmouseenter=\"saShowMethodTooltip('evEbitda')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>7. EV/EBITDA${val.evEbitdaTarget>0?' ('+val.evEbitdaTarget.toFixed(1)+'x target)':''} ℹ️</span>${saMethodCell(val,'evEbitdaVal','evEbitda')}</div>
       <div class="method-row" onmouseenter=\"saShowMethodTooltip('ps')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>8. P/S ℹ️</span>${saMethodCell(val,'psVal','ps')}</div>
       <div class="method-row" style="background:rgba(59,130,246,.12);border-top:2px solid #3b82f6"><span style="font-weight:700">Weighted (${val.validVals.length} methods)</span><span style="font-weight:700;color:#60a5fa">$${safeNum(val.fairValue).toFixed(2)}</span></div>
       ${dispersionHtml}
       ${reverseDcfHtml}
+      <div style="margin-top:10px;font-size:.72rem;color:#64748b;line-height:1.5;padding:8px 12px;background:rgba(255,255,255,.03);border-radius:8px">ℹ️ Methodology note: this uses the same CAPM discount rate as Legendary Investors' Buffett DCF, but a different blend — 8 methods weighted by company profile (${val.profile}) vs Buffett's average of Graham # + DCF + (EPS × P/E). Expect the two tools to disagree somewhat on the same ticker.</div>
     </div>`;
 
   }
@@ -2750,6 +2918,73 @@ function saRenderValuation(data) {
 // Detect a rough company profile from available metrics, used to pick
 // method weights that fit the business (a Graham/DDM-heavy blend makes
 // no sense for a 0.02%-yield hypergrowth stock, and vice versa).
+// Shared CAPM inputs — used by Stock Analyzer's DCF/Reverse DCF AND by
+// Legendary Investors' Buffett DCF, so both tools discount at the same
+// risk-adjusted rate instead of one using CAPM and the other a fixed 10%.
+const SA_RISK_FREE_DEFAULT = 0.04, SA_ERP_DEFAULT = 0.055, SA_TERMINAL_G = 0.03;
+// User-adjustable via the "Valuation Assumptions" panel (see saInitAssumptionsUI
+// below) — persisted in localStorage so a rate-cycle move doesn't require
+// editing code. Read from localStorage immediately (not just on DOMContentLoaded)
+// so any valuation run before the UI panel initializes still uses the saved rate.
+function saReadStoredAssumption(key, fallback) {
+  const v = parseFloat(localStorage.getItem(key));
+  return (isFinite(v) && v >= 0 && v <= 0.15) ? v : fallback;
+}
+let SA_RISK_FREE = saReadStoredAssumption('sa_risk_free', SA_RISK_FREE_DEFAULT);
+let SA_ERP       = saReadStoredAssumption('sa_erp', SA_ERP_DEFAULT);
+function saComputeWacc(beta) {
+  const b = (isFinite(beta) && beta > 0) ? beta : 1;
+  return Math.min(Math.max(SA_RISK_FREE + b * SA_ERP, 0.06), 0.16);
+}
+
+// Shared sector target multiples — single source of truth for "what's a
+// normal multiple for this sector". Used by Stock Analyzer's EV/EBITDA
+// method AND to prefill Fair Value → Multiples' sector-average fields, so
+// the two tools don't silently disagree about what "Sector EV/EBITDA" means
+// for the same ticker.
+const SA_SECTOR_EV_EBITDA = {
+  'Technology': 18, 'Healthcare': 16, 'Financial Services': 12,
+  'Consumer Cyclical': 14, 'Consumer Defensive': 15, 'Industrials': 13,
+  'Energy': 10, 'Utilities': 12, 'Real Estate': 20,
+  'Communication Services': 14, 'Semiconductors': 18
+};
+const SA_SECTOR_DEFAULT_EV_EBITDA = 14;
+// Growth adjustment for the sector EV/EBITDA target — a mature, low-growth
+// name in Technology (e.g. legacy networking) shouldn't be valued at the
+// same multiple as a hyper-growth name in the same sector just because
+// "Technology" is the only lever. Scales the sector baseline by a factor
+// derived from revenue growth, the same threshold shape already used for
+// the P/S method below (revGrowth > 30/20/10 → escalating multiple).
+function saGrowthAdjustedTarget(sectorBaseline, revGrowthPct) {
+  let factor = 0.85;                         // shrinking/flat revenue
+  if (revGrowthPct > 30)      factor = 1.35;  // hyper-growth
+  else if (revGrowthPct > 20) factor = 1.20;
+  else if (revGrowthPct > 10) factor = 1.05;
+  else if (revGrowthPct > 0)  factor = 0.95;  // low single-digit growth
+  return sectorBaseline * factor;
+}
+// Sector P/E defaults for Fair Value → Multiples prefill — mirrors the
+// sector/growth logic already used for Stock Analyzer's P/E method (see
+// peMultiple below) so the two "what P/E is normal here" answers match.
+const SA_SECTOR_PE = {
+  'Technology': 25, 'Semiconductors': 25, 'Healthcare': 20, 'Financial Services': 13,
+  'Consumer Cyclical': 20, 'Consumer Defensive': 20, 'Industrials': 18,
+  'Energy': 12, 'Utilities': 17, 'Real Estate': 18, 'Communication Services': 18
+};
+const SA_SECTOR_PE_DEFAULT = 18;
+const SA_SECTOR_PS = {
+  'Technology': 6, 'Semiconductors': 6, 'Healthcare': 4, 'Financial Services': 3,
+  'Consumer Cyclical': 2, 'Consumer Defensive': 2, 'Industrials': 2,
+  'Energy': 1.5, 'Utilities': 2.5, 'Real Estate': 6, 'Communication Services': 3
+};
+const SA_SECTOR_PS_DEFAULT = 2.5;
+const SA_SECTOR_PB = {
+  'Technology': 8, 'Semiconductors': 6, 'Healthcare': 5, 'Financial Services': 1.5,
+  'Consumer Cyclical': 4, 'Consumer Defensive': 5, 'Industrials': 3,
+  'Energy': 1.8, 'Utilities': 1.8, 'Real Estate': 2, 'Communication Services': 3
+};
+const SA_SECTOR_PB_DEFAULT = 3;
+
 function saDetectProfile(data) {
   const pe    = safeNum(data.pe);
   const pb    = safeNum(data.pb);
@@ -2881,8 +3116,8 @@ function saCalculateValuation(data) {
   // down to a 3% terminal rate over 5 years, discounted at a CAPM-derived
   // WACC proxy (risk-free + beta × equity risk premium) instead of a fixed
   // 10%/7% assumption baked in regardless of the company's risk profile.
-  const RISK_FREE = 0.04, ERP = 0.055, TERMINAL_G = 0.03;
-  const wacc = Math.min(Math.max(RISK_FREE + beta * ERP, 0.06), 0.16);
+  const TERMINAL_G = SA_TERMINAL_G;
+  const wacc = saComputeWacc(beta);
   let dcfVal = 0;
   let fcfSource = '';
   const fcfPerShare = fcfPerShareRaw > 0 ? fcfPerShareRaw : (eps > 0 ? eps * 0.8 : 0);
@@ -2967,16 +3202,11 @@ function saCalculateValuation(data) {
     }
   }
 
-  let evEbitdaVal = 0;
+  let evEbitdaVal = 0, evEbitdaTarget = 0;
   if (evToEbitdaEff > 0 && evToEbitdaEff < 100) {
-    const sectorMultiples = {
-      'Technology': 18, 'Healthcare': 16, 'Financial Services': 12,
-      'Consumer Cyclical': 14, 'Consumer Defensive': 15, 'Industrials': 13,
-      'Energy': 10, 'Utilities': 12, 'Real Estate': 20,
-      'Communication Services': 14, 'Semiconductors': 18
-    };
-    const target = sectorMultiples[data.sector] || 14;
-    evEbitdaVal = price * (target / evToEbitdaEff);
+    const sectorBaseline = SA_SECTOR_EV_EBITDA[data.sector] || SA_SECTOR_DEFAULT_EV_EBITDA;
+    evEbitdaTarget = saGrowthAdjustedTarget(sectorBaseline, revGrowth);
+    evEbitdaVal = price * (evEbitdaTarget / evToEbitdaEff);
   } else {
     reasons.evEbitda = 'EV/EBITDA unavailable from Finnhub and could not be computed';
   }
@@ -3035,7 +3265,7 @@ function saCalculateValuation(data) {
   return { graham, peVal, forwardPeVal, pegVal, dcfVal, ddmVal, evEbitdaVal, psVal,
            fairValue, potential, peMultiple, validVals,
            profile, reasons, epsSource, fcfSource, evEbitdaSource,
-           evToEbitdaEff, pegRatioEff, pegGrowthSource,
+           evToEbitdaEff, evEbitdaTarget, pegRatioEff, pegGrowthSource,
            wacc, impliedGrowth, dispersion };
 }
 
@@ -3576,7 +3806,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Service Worker registration ───────────────────────────────
 // Bump APP_VERSION AND CACHE_NAME in sw.js together on every deploy.
 // The version check below clears old caches immediately on load.
-const APP_VERSION = '1.7.2';
+const APP_VERSION = '1.9';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
@@ -3644,6 +3874,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initialise API key UI (reads from localStorage)
   saInitApiKeyUI();
+  saInitAssumptionsUI();
 
   document.getElementById('tickerInput').addEventListener('keypress', e => {
     if (e.key === 'Enter') saLoadStock();
@@ -4311,7 +4542,7 @@ function liUpdateRadar(investor, score) {
   }
 }
 
-function liResult(container, verdict, color, items, score, quote) {
+function liResult(container, verdict, color, items, score, quote, methodNote) {
   // Update radar chart with this investor's score
   const _invMap = {
     'li_b_results':'buffett','li_g_results':'graham','li_l_results':'lynch',
@@ -4348,7 +4579,8 @@ function liResult(container, verdict, color, items, score, quote) {
     <div class="li-result-box visible" style="margin-top:14px">
       <div class="li-result-grid">${items.map(it=>`<div class="li-result-item"><div class="li-result-label">${it.label}</div><div class="li-result-value ${it.cls||''}">${it.value}</div></div>`).join('')}</div>
     </div>
-    ${quote?`<div class="li-quote">${quote}</div>`:''}`;
+    ${quote?`<div class="li-quote">${quote}</div>`:''}
+    ${methodNote?`<div style="margin-top:10px;font-size:.72rem;color:var(--li-text3);line-height:1.5;padding:8px 12px;background:rgba(255,255,255,.03);border-radius:8px">${methodNote}</div>`:''}`;
 }
 
 function liCalculateBuffett() {
@@ -4367,12 +4599,17 @@ function liCalculateBuffett() {
   const de=parseFloat(document.getElementById('li_b_de').value);
   const fcf=parseFloat(document.getElementById('li_b_fcf').value);
   const moat=parseFloat(document.getElementById('li_b_moat').value);
+  const betaRaw=parseFloat(document.getElementById('li_b_beta').value);
   const pe=price/eps, pb=price/book;
   const graham=Math.sqrt(22.5*eps*book);
-  // DCF 10yr
+  // DCF 10yr — discounted at the same CAPM-derived WACC as Stock Analyzer's
+  // DCF (risk-free + beta × equity risk premium), not a fixed 10%. A low-beta
+  // utility and a high-beta growth name shouldn't be discounted at the same
+  // rate just because they're both being run through the Buffett method.
+  const wacc=saComputeWacc(betaRaw);
   const gr=Math.min(growth/100,0.20);
-  let dcf=0;for(let i=1;i<=10;i++)dcf+=(eps*Math.pow(1+gr,i))/Math.pow(1.10,i);
-  dcf+=(eps*Math.pow(1+gr,10)*1.03)/(0.10-0.03)/Math.pow(1.10,10);
+  let dcf=0;for(let i=1;i<=10;i++)dcf+=(eps*Math.pow(1+gr,i))/Math.pow(1+wacc,i);
+  dcf+=(eps*Math.pow(1+gr,10)*(1+SA_TERMINAL_G))/(wacc-SA_TERMINAL_G)/Math.pow(1+wacc,10);
   const fairValue=(graham+dcf+eps*pe)/3;
   const potential=(fairValue-price)/price*100;
   // Score
@@ -4392,11 +4629,13 @@ function liCalculateBuffett() {
     {label:'P/B Ratio',value:pb.toFixed(2)+'x',cls:pb<3?'pos':pb>5?'neg':'gold'},
     {label:'Graham #',value:'$'+graham.toFixed(2),cls:price<graham?'pos':'neg'},
     {label:'DCF Value',value:'$'+dcf.toFixed(2),cls:price<dcf?'pos':'neg'},
+    {label:'DCF Discount Rate',value:(wacc*100).toFixed(1)+'% (CAPM, β='+(isFinite(betaRaw)&&betaRaw>0?betaRaw:1).toFixed(2)+')',cls:''},
     {label:'Fair Value',value:'$'+fairValue.toFixed(2),cls:potential>10?'pos':potential>0?'gold':'neg'},
     {label:'Upside',value:(potential>0?'+':'')+potential.toFixed(1)+'%',cls:potential>20?'pos':potential>0?'gold':'neg'},
     {label:'ROE',value:roe.toFixed(1)+'%',cls:roe>=15?'pos':'neg'},
     {label:'Moat',value:moat+'/5',cls:moat>=4?'gold':''},
-  ],score,score>=80?'"It\'s far better to buy a wonderful company at a fair price than a fair company at a wonderful price." — Charlie Munger':'');
+  ],score,score>=80?'"It\'s far better to buy a wonderful company at a fair price than a fair company at a wonderful price." — Charlie Munger':'',
+  'ℹ️ Methodology note: this DCF uses the same CAPM discount rate as Stock Analyzer\'s valuation engine, but a different blend — Fair Value here averages Graham # + DCF + (EPS × current P/E), while Stock Analyzer weights 8 methods by company profile. The two tools can still land on different numbers for the same ticker; that\'s expected, not a bug.');
 
   }
   catch(e) {
