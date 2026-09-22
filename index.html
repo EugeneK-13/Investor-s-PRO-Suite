@@ -6,8 +6,8 @@
 <meta name="theme-color" content="#0a0e1a">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="InvCalc Pro">
-<title>InvCalc Pro Suite</title>
+<meta name="apple-mobile-web-app-title" content="SV Pro">
+<title>SV Pro — Stock Valuation Professional</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
@@ -936,7 +936,7 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
 <nav class="app-sidebar" id="sidebar">
   <div class="sidebar-logo">
     <div class="logo-icon">📊</div>
-    <span class="logo-text">InvCalc Pro</span>
+    <span class="logo-text">SV Pro</span>
     <button class="sidebar-toggle" onclick="toggleSidebar()" title="Collapse">◀</button>
   </div>
   <div class="nav-section-label">Main</div>
@@ -973,7 +973,7 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
 <div id="page-dashboard" class="app-page page-active">
   <div class="install-banner" id="installBanner">
     <div class="install-banner-text">
-      <div class="install-title">📱 Install InvCalc Pro Suite</div>
+      <div class="install-title">📱 Install SV Pro</div>
       <div class="install-sub">Add to Home Screen · Works offline · No app store needed</div>
     </div>
     <button class="install-btn" id="installBtn">Install App</button>
@@ -981,10 +981,10 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
   <!-- Mobile top bar for Dashboard (hidden on desktop via CSS) -->
   <div class="page-topbar" id="dashTopbar" style="display:none">
     <button class="mobile-menu-btn" onclick="toggleMobileSidebar()" aria-label="Menu">☰</button>
-    <span class="page-topbar-title">📊 InvCalc Pro</span>
+    <span class="page-topbar-title">📊 SV Pro</span>
   </div>
   <div class="dash-hero">
-    <h1>📊 InvCalc Pro Suite</h1>
+    <h1>📊 SV Pro <span style="font-size:.5em;font-weight:500;opacity:.6">— Stock Valuation Professional</span></h1>
     <p>All your investment analysis tools in one place. Load a stock in Stock Analyzer and data flows automatically into other tools.</p>
   </div>
   <div class="dash-bridge" id="dashBridge">
@@ -2082,11 +2082,11 @@ function showError(containerId, msg) {
 
 // Global uncaught error logger — surfaces silent JS failures
 window.onerror = function(msg, src, line, col, err) {
-  console.error('[InvCalc] ' + msg, { src, line, col, stack: err && err.stack });
+  console.error('[SVPro] ' + msg, { src, line, col, stack: err && err.stack });
   return false;
 };
 window.addEventListener('unhandledrejection', function(e) {
-  console.error('[InvCalc Promise]', e.reason);
+  console.error('[SVPro Promise]', e.reason);
 });
 
 // ── Field validation helpers ────────────────────────────────────
@@ -3636,7 +3636,7 @@ async function saExportFullPDF() {
     pdf.rect(0, PH - 12, PW, 12, 'F');
     pdf.setFontSize(8);
     pdf.setTextColor(100, 116, 139);
-    pdf.text('InvCalc Pro Suite  •  Data: Finnhub API  •  For informational purposes only, not financial advice', M, PH - 4);
+    pdf.text('SV Pro  •  Data: Finnhub API  •  For informational purposes only, not financial advice', M, PH - 4);
     pdf.text(d.symbol + '_analysis.pdf', PW - M - 35, PH - 4);
 
     pdf.save(d.symbol + '_analysis.pdf');
@@ -3806,7 +3806,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Service Worker registration ───────────────────────────────
 // Bump APP_VERSION AND CACHE_NAME in sw.js together on every deploy.
 // The version check below clears old caches immediately on load.
-const APP_VERSION = '1.9';
+const APP_VERSION = '2.0';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
@@ -3851,7 +3851,7 @@ async function clearOldCachesAndReload() {
     const stored = localStorage.getItem('invcalc_version');
     if (stored === APP_VERSION) return;           // already up to date
 
-    console.log(`[InvCalc] Version changed (${stored} → ${APP_VERSION}), clearing caches…`);
+    console.log(`[SVPro] Version changed (${stored} → ${APP_VERSION}), clearing caches…`);
     const keys = await caches.keys();
     await Promise.all(keys.map(k => caches.delete(k)));
     localStorage.setItem('invcalc_version', APP_VERSION);
@@ -3864,7 +3864,7 @@ async function clearOldCachesAndReload() {
       }
     }
   } catch (e) {
-    console.warn('[InvCalc] Cache check failed:', e);
+    console.warn('[SVPro] Cache check failed:', e);
   }
 }
 

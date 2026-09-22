@@ -1,7 +1,7 @@
 {
-  "name": "InvCalc Pro Suite",
-  "short_name": "InvCalc Pro",
-  "description": "Professional investment analysis: Stock Analyzer, DCF, DCA, Fair Value, Options & more",
+  "name": "SV Pro — Stock Valuation Professional",
+  "short_name": "SV Pro",
+  "description": "Professional stock valuation & investment analysis: Stock Analyzer, DCF, DCA, Fair Value and more",
   "start_url": "./index.html",
   "scope": "/Investor-s-PRO-Suite/",
   "display": "standalone",
