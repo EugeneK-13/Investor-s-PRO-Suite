@@ -2286,12 +2286,37 @@ function bSetStr(id, val) {
   const el = document.getElementById(id);
   if (el && val) el.value = val;
 }
+// Clear a numeric field when the loaded stock has no value for it — so the
+// calculator's validation flags it, instead of silently keeping the demo
+// default (e.g. Microsoft's 7,430M shares / $70,000M FCF under an AAPL load).
+function bClear(id) {
+  const el = document.getElementById(id);
+  if (el) el.value = '';
+}
+const bRound = (v, dp) => { const p = Math.pow(10, dp); return Math.round(v * p) / p; };
+// Inputs every bridged calculator should agree with Stock Analyzer on.
+function bDerived(d) {
+  const sg = saSustainableGrowth(d);
+  const sharesM = safeNum(d.sharesOutstanding) > 0 ? d.sharesOutstanding / 1e6 : 0;
+  const fcfPS = safeNum(d.freeCashFlowPerShare);
+  return {
+    grow:    sg.parts.length ? bRound(sg.g, 1) : null,       // sustainable growth %, not TTM EPS growth
+    eps:     safeNum(d.eps) > 0 ? bRound(d.eps, 2) : null,
+    sharesM: sharesM > 0 ? Math.round(sharesM) : null,
+    fcfM:    fcfPS > 0 && sharesM > 0 ? Math.round(fcfPS * sharesM) : null,
+    div:     bRound(safeNum(d.dividendPerShare), 2),
+    divYld:  safeNum(d.price) > 0 ? bRound(safeNum(d.dividendPerShare) / d.price * 100, 2) : 0,
+    wacc:    bRound(saComputeWacc(safeNum(d.beta, 1)) * 100, 1),
+    sectorPe: SA_SECTOR_PE[d.sector] || SA_SECTOR_PE_DEFAULT,
+  };
+}
 
 function liBridgeLoad(inv) {
   if (!bridgeData) return;
   const d = bridgeData;
-  const grow = d.epsGrowth && d.epsGrowth > 0 ? d.epsGrowth : (d.revenueGrowth && d.revenueGrowth > 0 ? d.revenueGrowth : null);
-  const epsAbs = d.eps && d.eps > 0 ? d.eps : (d.freeCashFlowPerShare && d.freeCashFlowPerShare > 0 ? d.freeCashFlowPerShare : null);
+  const bd = bDerived(d);
+  const grow = bd.grow;
+  const epsAbs = bd.eps !== null ? bd.eps : (safeNum(d.freeCashFlowPerShare) > 0 ? bRound(d.freeCashFlowPerShare, 2) : null);
   // Auto-calculate map — each entry: populate fields, then run the calculator
   const calcFn = {
     buffett: liCalculateBuffett,
@@ -2314,7 +2339,7 @@ function liBridgeLoad(inv) {
     },
     lynch: () => {
       bSet('li_l_price', d.price); bSet('li_l_eps', epsAbs); bSetStr('li_l_name', d.name);
-      bSet('li_l_growth', grow); bSet('li_l_de', d.debtToEquity);
+      bSet('li_l_growth', grow); bSet('li_l_de', d.debtToEquity); bSet('li_l_dy', bd.divYld);
       bSet('li_l_margin', d.profitMargin); bSet('li_l_cr', d.currentRatio);
     },
     fisher: () => {
@@ -2339,24 +2364,28 @@ function liBridgeLoad(inv) {
 function fvBridgeLoad() {
   if (!bridgeData) return;
   const d = bridgeData;
-  const grow = d.epsGrowth && d.epsGrowth > 0 ? d.epsGrowth : (d.revenueGrowth && d.revenueGrowth > 0 ? d.revenueGrowth : null);
-  const epsAbs = d.eps && d.eps > 0 ? d.eps : null;
-  const fcfM = d.freeCashFlowPerShare && d.marketCap && d.price
-    ? Math.round(d.freeCashFlowPerShare * (d.marketCap / d.price) / 1e6) : null;
+  // Same inputs as Stock Analyzer: sustainable growth (not the noisy TTM EPS
+  // growth), CAPM WACC, sector P/E, real share count and FCF. Anything the
+  // loaded stock doesn't have is cleared rather than left at the demo default.
+  const bd = bDerived(d);
+  const grow = bd.grow, epsAbs = bd.eps, fcfM = bd.fcfM;
+  const setOrClear = (id, v) => (v !== null && v !== undefined ? bSet(id, v) : bClear(id));
   // Combined tab
-  bSet('fv_c_price', d.price); bSet('fv_c_eps', epsAbs); bSetStr('fv_c_company', d.name);
-  bSet('fv_c_growth', grow); bSet('fv_c_div', d.dividendPerShare);
-  if (fcfM) bSet('fv_c_fcf', fcfM);
+  bSet('fv_c_price', d.price); setOrClear('fv_c_eps', epsAbs); bSetStr('fv_c_company', d.name);
+  setOrClear('fv_c_growth', grow); bSet('fv_c_div', bd.div);
+  setOrClear('fv_c_fcf', fcfM); setOrClear('fv_c_shares', bd.sharesM);
+  bSet('fv_c_wacc', bd.wacc); bSet('fv_c_spe', bd.sectorPe);
   // DCF tab
-  bSet('fv_dcf_price', d.price); if (fcfM) bSet('fv_dcf_fcf', fcfM);
-  bSet('fv_dcf_growth5', grow); bSetStr('fv_dcf_company', d.name);
+  bSet('fv_dcf_price', d.price); setOrClear('fv_dcf_fcf', fcfM); setOrClear('fv_dcf_shares', bd.sharesM);
+  setOrClear('fv_dcf_growth5', grow); if (grow !== null) bSet('fv_dcf_growth10', bRound(grow / 2, 1), true);
+  bSet('fv_dcf_wacc', bd.wacc); bSetStr('fv_dcf_company', d.name);
   // Graham tab
-  bSet('fv_gr_price', d.price); bSet('fv_gr_eps', epsAbs);
-  bSet('fv_gr_growth', grow); bSetStr('fv_gr_company', d.name);
+  bSet('fv_gr_price', d.price); setOrClear('fv_gr_eps', epsAbs);
+  setOrClear('fv_gr_growth', grow); bSetStr('fv_gr_company', d.name);
   // DDM tab
-  bSet('fv_ddm_price', d.price); bSet('fv_ddm_div', d.dividendPerShare);
+  bSet('fv_ddm_price', d.price); bSet('fv_ddm_div', bd.div);
   // Multiples tab
-  bSet('fv_m_price', d.price); bSet('fv_m_eps', epsAbs);
+  bSet('fv_m_price', d.price); setOrClear('fv_m_eps', epsAbs);
   if (d.bookValue) bSet('fv_m_book', d.bookValue);
   if (d.revenuePerShare) bSet('fv_m_sales', d.revenuePerShare);
   // Market cap / debt / EBITDA — previously the only Fair Value tab that
@@ -2396,13 +2425,12 @@ function fvBridgeLoad() {
 function dcfBridgeLoad() {
   if (!bridgeData) return;
   const d = bridgeData;
-  const grow = d.epsGrowth && d.epsGrowth > 0 ? Math.min(d.epsGrowth, 50) : (d.revenueGrowth && d.revenueGrowth > 0 ? Math.min(d.revenueGrowth, 50) : null);
-  if (d.freeCashFlowPerShare && d.marketCap && d.price) {
-    const fcfM = Math.round(d.freeCashFlowPerShare * (d.marketCap / d.price) / 1e6);
-    if (fcfM > 0) { bSet('dcf_c_fcf', fcfM); bSet('dcf_e_fcf', fcfM); }
-  }
+  const bd = bDerived(d);
+  const grow = bd.grow;
+  if (bd.fcfM) { bSet('dcf_c_fcf', bd.fcfM); bSet('dcf_e_fcf', bd.fcfM); }
   bSetStr('dcf_c_name', d.name); bSetStr('dcf_e_name', d.name);
   if (grow) { bSet('dcf_c_growth', grow); bSet('dcf_e_growth', grow); }
+  bSet('dcf_c_wacc', bd.wacc); bSet('dcf_e_wacc', bd.wacc);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2427,6 +2455,28 @@ const saFetch = (path) => {
 // exact keys first, then the first key matching `re`. Returns null — not 0 —
 // when nothing is found, so checks can say "n/a" instead of mistaking a
 // missing field for a real zero (e.g. "no debt").
+// FCF/share: Finnhub's key coverage varies by ticker (for AAPL the direct
+// key came back empty, so the app silently fell back to EPS × 0.8). Try the
+// per-share keys, then price ÷ P/FCF, then total FCF ($M) ÷ shares.
+function saDeriveFcfPerShare(m, price, shares) {
+  const direct = saPickMetric(m, ['freeCashFlowPerShareTTM', 'freeCashFlowPerShareAnnual'], /^freeCashFlowPerShare(TTM|Annual)$/i);
+  if (direct !== null && direct !== 0) return direct;
+  const pfcf = saPickMetric(m, ['pfcfShareTTM', 'pfcfShareAnnual'], /^pfcfShare(TTM|Annual)$/i);
+  if (pfcf !== null && pfcf !== 0 && price > 0) return price / pfcf;
+  const fcfM = saPickMetric(m, ['freeCashFlowTTM', 'freeCashFlowAnnual'], /^freeCashFlow(TTM|Annual)$/i);
+  if (fcfM !== null && fcfM !== 0 && shares > 0) return fcfM * 1e6 / shares;
+  return 0;
+}
+// Dividend/share: same story (AAPL came back 0). Per-share keys first,
+// then dividend yield × price.
+function saDeriveDividendPerShare(m, price) {
+  const d = saPickMetric(m, ['dividendPerShareTTM', 'dividendsPerShareTTM', 'dividendPerShareAnnual', 'dividendsPerShareAnnual'], /^dividends?PerShare(TTM|Annual)$/i);
+  if (d !== null && d > 0) return d;
+  const y = saPickMetric(m, ['currentDividendYieldTTM', 'dividendYieldIndicatedAnnual'], null);
+  if (y !== null && y > 0 && price > 0) return price * y / 100;
+  return 0;
+}
+
 function saPickMetric(m, exactKeys, re) {
   for (const k of exactKeys) {
     const v = parseFloat(m[k]);
@@ -2572,14 +2622,14 @@ let saAlerts    = JSON.parse(localStorage.getItem('alerts')    || '[]');
 let saCurrentTooltip = null;
 
 const SA_METHOD_TOOLTIPS = {
-  graham:    { title:'Graham Number',     formula:'√(22.5 × EPS × Book Value)', desc:'Conservative estimate by Benjamin Graham. Uses normalized EPS if TTM EPS is negative.' },
+  graham:    { title:'Graham Number',     formula:'√(22.5 × EPS × Book Value)', desc:'Conservative estimate by Benjamin Graham. Uses normalized EPS if TTM EPS is negative. Not applied when P/B > 10 — book value shrunk by buybacks (or an intangibles-heavy business) makes a balance-sheet formula meaningless.' },
   pe:        { title:'P/E Valuation',     formula:'EPS × P/E Multiple',         desc:'Earnings-based valuation. P/E varies by sector' },
   forwardPe: { title:'Forward P/E',       formula:'(Price/Fwd P/E) × Sector Mult', desc:'Uses forward EPS estimates — often unavailable on free data plans' },
-  peg:       { title:'PEG Ratio',         formula:'Price / (P/E / Growth, capped at 60%)', desc:'Uses EPS growth when positive, otherwise revenue growth (EPS growth is often negative/unusable right after a loss-to-profit swing)' },
-  dcf:       { title:'DCF (5yr, 2-stage)',formula:'Σ(FCF/(1+WACC)^t)+Terminal', desc:'WACC estimated via CAPM (risk-free + β×premium). Growth tapers to 3% terminal over 5 years.' },
-  ddm:       { title:'Dividend Discount', formula:'D×(1+g)/(r-g)',              desc:"Gordon Model for dividend stocks. Needs an actual dividend." },
+  peg:       { title:'Lynch Fair Value',  formula:'EPS × (growth % + dividend yield %)', desc:'Peter Lynch: a fairly priced stock has a P/E equal to its growth rate plus dividend yield (dividend-adjusted PEG = 1). Uses the sustainable growth estimate, not TTM EPS growth. Only applied when growth + yield is at least 8% — Lynch used it for growth companies. Same formula as Legendary Investors → Lynch.' },
+  dcf:       { title:'DCF (10-yr)',       formula:'Σ FCF/(1+WACC)^t + Terminal', desc:'WACC via CAPM (risk-free + β × premium). Growth starts at the sustainable estimate and fades to 3% over 10 years. Assumptions are listed under the Fair Value card.' },
+  ddm:       { title:'Dividend Discount', formula:'D×(1+g)/(r-g)',              desc:'Gordon Model. Only applied when the dividend yield is at least 1.5% — below that the company returns cash mainly through buybacks or reinvests it.' },
   evEbitda:  { title:'EV/EBITDA',         formula:'Price × (Growth-Adj. Sector Target/Current)', desc:'3-tier fallback: Finnhub ratio → computed from EV & reported EBITDA → approximated from operating margin if no EBITDA figure exists at all. Sector target multiple is scaled by revenue growth (0.85×–1.35×) so a mature and a hyper-growth name in the same sector aren\'t valued at the same multiple.' },
-  ps:        { title:'Price/Sales',       formula:'Revenue × Target P/S',       desc:'Revenue-based valuation' },
+  ps:        { title:'Price/Sales',       formula:'Revenue × Target P/S',       desc:'Profitable companies: target P/S = sector P/E × net margin, shown for reference only (it equals the P/E method, so it is not double-counted). Loss-makers: growth-tiered 2–5× target, blended.' },
   mos:       { title:'Conservative Fair Value & Margin of Safety', formula:'Lowest of the surviving methods', desc:'Instead of the weighted-average Fair Value above, this takes the single most pessimistic method that still passed the sanity filters — the "if I\'m wrong, how wrong could I be" number. Margin of Safety = (Conservative Fair Value − Current Price) / Current Price. A value investor buys with room for the weighted estimate to be too optimistic; this is that room, expressed as a percentage.' },
   scenarios: { title:'Bear / Base / Bull — Price in 5 Years', formula:'Year-5 earnings × exit P/E', desc:'One engine for every stock. Earnings base: forward EPS if available (already year 1, so only years 2–5 are grown), else TTM/normalized EPS, else FCF/share. Growth starts at the scenario rate and fades to 6% by year 5 (a decline fades to 0%). Exit P/E mean-reverts from the stock\'s current multiple toward its sector norm: Base = halfway, Bear = the lower of the two × 0.85, Bull = the higher. PW target weights the three 25/50/25 (35/45/20 when the valuation methods disagree sharply). 5Y CAGR is price-only. Because the targets are year-5 prices, the PW target is also shown discounted back at WACC so it can be compared like-for-like with today\'s Fair Value.' }
 };
@@ -2654,7 +2704,8 @@ async function saLoadStock() {
       price:                safeNum(quote.c),
       marketCap:            safeNum(profile.marketCapitalization) * 1e6,
       // Valuation
-      pe:                   safeNum(m['peNormalizedAnnual']        || m['peTTM']),
+      // TTM first (matches what quote sites show); normalized annual only as fallback
+      pe:                   safeNum(m['peTTM'] || m['peExclExtraTTM']  || m['peNormalizedAnnual']),
       forwardPE:            safeNum(m['forwardPE']                 || m['peForward']),
       pb:                   safeNum(m['pbAnnual']                  || m['pbQuarterly']),
       priceToSales:         safeNum(m['psTTM']                     || m['psAnnual']),
@@ -2665,10 +2716,10 @@ async function saLoadStock() {
       epsNormalized:        safeNum(m['epsNormalizedAnnual']),
       bookValue:            safeNum(m['bookValuePerShareAnnual']   || m['bookValuePerShareQuarterly']),
       revenuePerShare:      safeNum(m['revenuePerShareTTM']        || m['revenuePerShareAnnual']),
-      freeCashFlowPerShare: safeNum(m['freeCashFlowPerShareTTM']   || m['freeCashFlowPerShareAnnual']),
+      freeCashFlowPerShare: saDeriveFcfPerShare(m, safeNum(quote.c), safeNum(profile.shareOutstanding) * 1e6),
       ebitdaPerShare:       safeNum(m['ebitdPerShareTTM']          || m['ebitdPerShareAnnual']),
-      dividendPerShare:     safeNum(m['dividendsPerShareAnnual']   || m['dividendsPerShareTTM']),
-      dividendYield:        safeNum(m['currentDividendYieldTTM']),
+      dividendPerShare:     saDeriveDividendPerShare(m, safeNum(quote.c)),
+      dividendYield:        safeNum(m['currentDividendYieldTTM']   || m['dividendYieldIndicatedAnnual']),
       sharesOutstanding:    safeNum(profile.shareOutstanding) * 1e6,
       beta:                 safeNum(m['beta'], 1),
       // Ratios / margins
@@ -2688,6 +2739,10 @@ async function saLoadStock() {
       // Growth
       revenueGrowth:        safeNum(m['revenueGrowthTTMYoy']       || m['revenueGrowth3Y']),
       epsGrowth:            safeNum(m['epsGrowthTTMYoy']           || m['epsGrowth3Y']),
+      epsGrowth3Y:          saPickMetric(m, ['epsGrowth3Y'], null),
+      epsGrowth5Y:          saPickMetric(m, ['epsGrowth5Y'], null),
+      revenueGrowth3Y:      saPickMetric(m, ['revenueGrowth3Y'], null),
+      revenueGrowth5Y:      saPickMetric(m, ['revenueGrowth5Y'], null),
       // 52W range
       high52:               safeNum(m['52WeekHigh']),
       low52:                safeNum(m['52WeekLow']),
@@ -2792,14 +2847,14 @@ function saRenderOverview(data) {
   const val = saCalculateValuation(data);
   const peg = safeNum(val.pegRatioEff);
   const pegLabel = peg > 0
-    ? f2(peg) + (val.pegGrowthSource === 'Revenue growth (EPS growth unusable)' ? ' *' : '')
+    ? f2(peg) + ' *'
     : 'N/A';
   const evE = safeNum(val.evToEbitdaEff);
   const evELabel = evE > 0
     ? f2(evE, 'x') + (val.evEbitdaSource && val.evEbitdaSource.indexOf('Finnhub') === -1 ? ' ≈' : '')
     : 'N/A';
   const footnotes = [];
-  if (peg > 0 && val.pegGrowthSource === 'Revenue growth (EPS growth unusable)') footnotes.push('* PEG uses revenue growth — EPS growth was negative/unusable');
+  if (peg > 0) footnotes.push('* PEG = P/E ÷ sustainable growth ' + safeNum(val.growth && val.growth.g).toFixed(1) + '% (' + escapeHtml(val.pegGrowthSource) + ')');
   if (evE > 0 && val.evEbitdaSource && val.evEbitdaSource.indexOf('Finnhub') === -1) footnotes.push('≈ EV/EBITDA is computed (' + val.evEbitdaSource + '), not a value reported by Finnhub directly');
 
   document.getElementById('saOverview').innerHTML = `
@@ -2834,8 +2889,125 @@ function saMethodCell(val, valueKey, reasonKey) {
   if (v > 0) return `<span>$${v.toFixed(2)}</span>`;
   const reason = val.reasons && val.reasons[reasonKey];
   return reason
-    ? `<span style="color:#64748b;font-size:.82em;font-weight:400" title="${reason}">Excluded — ${reason}</span>`
+    ? `<span style="color:#64748b;font-size:.82em;font-weight:400" title="${reason}">${/^(Not applicable|Ref\.)/.test(reason) ? '' : 'Excluded — '}${reason}</span>`
     : `<span>N/A</span>`;
+}
+
+// ══ Analyst Consensus & Price Target ══════════════════════════════
+// A second, independent opinion next to our model. Ratings come from
+// /stock/recommendation (free plan); the price target from
+// /stock/price-target, which Finnhub may reserve for paid plans — then the
+// card still shows the ratings and says why the target is missing.
+const saAnalystCache = {};
+
+async function saFetchAnalyst(symbol) {
+  if (saAnalystCache[symbol]) return saAnalystCache[symbol];
+  const get = async (path) => {
+    try {
+      const r = await saFetch(path);
+      if (r.status === 401 || r.status === 403) return { na: 'plan' };
+      if (r.status === 429) return { na: 'rate', transient: true };
+      if (!r.ok) return { na: 'http', status: r.status, transient: true };
+      let json = null;
+      try { json = await r.json(); } catch (e) { /* treated as empty */ }
+      return { json };
+    } catch (e) { return { na: 'network', transient: true }; }
+  };
+  const sym = encodeURIComponent(symbol);
+  const [rec, pt] = await Promise.all([
+    get(`/stock/recommendation?symbol=${sym}`),
+    get(`/stock/price-target?symbol=${sym}`),
+  ]);
+  const why = (x, what) => x.na === 'plan' ? `${what} isn't available on your Finnhub plan`
+    : x.na === 'rate' ? 'Finnhub rate limit reached — reload in a minute'
+    : x.na === 'network' ? 'Network error — try reloading'
+    : x.na === 'http' ? `Finnhub error (HTTP ${x.status})` : null;
+  const out = { rec: null, recPrev: null, recNa: null, pt: null, ptNa: null };
+  if (rec.json && Array.isArray(rec.json) && rec.json.length) {
+    const sorted = rec.json.slice().sort((a, b) => String(b.period || '').localeCompare(String(a.period || '')));
+    out.rec = sorted[0];
+    out.recPrev = sorted.length > 3 ? sorted[3] : null;   // monthly periods → ~3 months earlier
+  } else {
+    out.recNa = why(rec, 'Analyst ratings') || 'No analyst coverage on Finnhub for this ticker';
+  }
+  if (pt.json && safeNum(pt.json.targetMean) > 0) out.pt = pt.json;
+  else out.ptNa = why(pt, 'Analyst price target') || 'No price target published for this ticker';
+  if (!rec.transient && !pt.transient) saAnalystCache[symbol] = out;
+  return out;
+}
+
+// Pure (no DOM): counts → consensus. Score is the usual 1–5 scale
+// (5 = Strong Buy … 1 = Strong Sell), averaged over all analysts.
+function saAnalystAssess(r) {
+  const n = k => Math.max(0, Math.round(safeNum(r && r[k])));
+  const c = { strongBuy: n('strongBuy'), buy: n('buy'), hold: n('hold'), sell: n('sell'), strongSell: n('strongSell') };
+  const total = c.strongBuy + c.buy + c.hold + c.sell + c.strongSell;
+  if (!total) return null;
+  const score = (5 * c.strongBuy + 4 * c.buy + 3 * c.hold + 2 * c.sell + c.strongSell) / total;
+  const label = score >= 4.5 ? 'Strong Buy' : score >= 3.5 ? 'Buy' : score >= 2.5 ? 'Hold' : score >= 1.5 ? 'Sell' : 'Strong Sell';
+  return { c, total, score, label,
+           bullish: (c.strongBuy + c.buy) / total * 100,
+           bearish: (c.sell + c.strongSell) / total * 100 };
+}
+
+function saAnalystHtml(a, price, fairValue) {
+  const fmtPeriod = p => {
+    const d = new Date(String(p || '').slice(0, 10) + 'T00:00:00Z');
+    return isNaN(d) ? '' : d.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+  };
+  const box = inner => `<div style="margin-top:14px;padding:12px 14px;background:#eef2f7;border:1px solid rgba(15,23,42,.12);border-radius:10px">
+      <div style="font-weight:700;font-size:.85em;margin-bottom:8px;color:#334155">👥 Analyst Consensus &amp; Price Target</div>${inner}</div>`;
+  const parts = [];
+  const cons = a.rec ? saAnalystAssess(a.rec) : null;
+  if (cons) {
+    const segs = [
+      ['strongBuy', 'Strong Buy', '#047857', '#fff'], ['buy', 'Buy', '#10b981', '#fff'],
+      ['hold', 'Hold', '#f59e0b', '#1e293b'], ['sell', 'Sell', '#ef4444', '#fff'], ['strongSell', 'Strong Sell', '#991b1b', '#fff'],
+    ];
+    const lblColor = cons.score >= 3.5 ? '#047857' : cons.score >= 2.5 ? '#b45309' : '#dc2626';
+    parts.push(`<div style="font-size:.9em;color:#1e293b;margin-bottom:8px"><strong style="color:${lblColor}">${cons.label}</strong> · ${cons.bullish.toFixed(0)}% bullish · ${cons.total} analysts <span style="color:#64748b">(${fmtPeriod(a.rec.period)}, score ${cons.score.toFixed(2)} / 5)</span></div>`);
+    parts.push(`<div style="display:flex;height:26px;border-radius:7px;overflow:hidden;margin-bottom:6px">${
+      segs.filter(([k]) => cons.c[k] > 0).map(([k, name, bg, fg]) => {
+        const w = cons.c[k] / cons.total * 100;
+        return `<div title="${name}: ${cons.c[k]}" style="width:${w}%;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700">${w >= 6 ? cons.c[k] : ''}</div>`;
+      }).join('')}</div>`);
+    parts.push(`<div style="display:flex;flex-wrap:wrap;gap:4px 14px;font-size:.75rem;color:#334155">${
+      segs.map(([k, name, bg]) => `<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${bg};margin-right:4px"></span>${cons.c[k]} ${name}</span>`).join('')}</div>`);
+    const prev = a.recPrev ? saAnalystAssess(a.recPrev) : null;
+    if (prev) {
+      const d = cons.bullish - prev.bullish;
+      parts.push(`<div style="margin-top:6px;font-size:.75rem;color:#475569">3 months ago: ${prev.bullish.toFixed(0)}% bullish (${prev.total} analysts) — ${Math.abs(d) < 2 ? 'sentiment steady' : d > 0 ? `sentiment improving (+${d.toFixed(0)} pts)` : `sentiment cooling (${d.toFixed(0)} pts)`}.</div>`);
+    }
+  } else {
+    parts.push(`<div style="font-size:.82em;color:#475569">Ratings: n/a — ${escapeHtml(a.recNa || 'no data')}</div>`);
+  }
+  if (a.pt) {
+    const mean = safeNum(a.pt.targetMean), med = safeNum(a.pt.targetMedian), hi = safeNum(a.pt.targetHigh), lo = safeNum(a.pt.targetLow);
+    const up = price > 0 ? (mean / price - 1) * 100 : 0;
+    const upColor = up > 0 ? '#047857' : '#dc2626';
+    const upd = a.pt.lastUpdated ? fmtPeriod(a.pt.lastUpdated) : '';
+    parts.push(`<div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(148,163,184,.3);font-size:.85em;color:#1e293b">
+        Avg target <strong style="font-family:'DM Mono',monospace">$${mean.toFixed(2)}</strong> <strong style="color:${upColor}">(${up > 0 ? '+' : ''}${up.toFixed(1)}%)</strong>
+        ${med > 0 ? ` · median $${med.toFixed(2)}` : ''}${lo > 0 && hi > 0 ? ` · range $${lo.toFixed(0)}–$${hi.toFixed(0)}` : ''}${upd ? ` <span style="color:#64748b">(updated ${upd})</span>` : ''}</div>`);
+    if (fairValue > 0) {
+      const gap = (mean / fairValue - 1) * 100;
+      parts.push(`<div style="margin-top:6px;font-size:.75rem;color:#475569;line-height:1.5">Two independent opinions: analysts' average target is ${Math.abs(gap).toFixed(0)}% ${gap >= 0 ? 'above' : 'below'} our Fair Value ($${fairValue.toFixed(2)}). Analysts mostly price on forward multiples and 12-month sentiment; our model on conservative fundamentals — a large gap is normal for quality names the market pays a premium for.</div>`);
+    }
+  } else {
+    parts.push(`<div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(148,163,184,.3);font-size:.82em;color:#475569">Price target: n/a — ${escapeHtml(a.ptNa || 'no data')}</div>`);
+  }
+  return box(parts.join(''));
+}
+
+async function saLoadAnalyst(data, val) {
+  const el = document.getElementById('saAnalystCard');
+  if (!el) return;
+  if (!saGetApiKey()) { el.innerHTML = saAnalystHtml({ recNa: 'Finnhub API key not set', ptNa: 'Finnhub API key not set' }, 0, 0); return; }
+  const sym = data.symbol;
+  const r = await saFetchAnalyst(sym);
+  if (saCurrentData && saCurrentData.symbol !== sym) return;   // user already loaded another ticker
+  const target = document.getElementById('saAnalystCard');
+  if (target) target.innerHTML = saAnalystHtml(r, safeNum(data.price), safeNum(val && val.fairValue));
 }
 
 function saRenderValuation(data) {
@@ -2845,6 +3017,13 @@ function saRenderValuation(data) {
   if (val.potential > 20) { cardClass += ' undervalued'; rec = '🟢 BUY'; }
   else if (val.potential > 0) { cardClass += ' hold'; rec = '🟡 HOLD'; }
 
+  // Key assumptions, shown right under the number so they can be argued with.
+  const g = val.growth || { g: 0, source: 'no growth data' };
+  const assumptionsHtml = `<div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.25);font-size:.72rem;line-height:1.55;opacity:.92;font-weight:500">
+      ${val.validVals.length} of 8 methods blended (${val.profile} weights)
+      · DCF: ${SA_DCF_YEARS} yrs, FCF/share $${safeNum(val.fcfPerShare).toFixed(2)}${/Estimated/.test(val.fcfSource||'') ? ' (est. from EPS)' : ''}, growth ${g.g.toFixed(1)}% → 3%, WACC ${(val.wacc*100).toFixed(1)}% (β ${safeNum(val.beta,1).toFixed(2)}, Rf ${(SA_RISK_FREE*100).toFixed(1)}%, ERP ${(SA_ERP*100).toFixed(1)}%)
+      <br>Growth source: ${escapeHtml(g.source)}
+    </div>`;
   const profileBadge = `<span style="display:inline-block;margin-left:8px;padding:2px 9px;border-radius:20px;font-size:.72em;font-weight:700;background:rgba(255,255,255,.18)">${val.profile} profile</span>`;
 
   const dispersionHtml = val.dispersion && val.dispersion.high
@@ -2879,30 +3058,28 @@ function saRenderValuation(data) {
         // Recent actual growth for comparison — Finnhub's free plan only gives
         // TTM YoY figures, not a multi-year historical series, so this is
         // labeled "recent" rather than claiming a 5-year CAGR we don't have.
-        const epsG = safeNum(data.epsGrowth);
-        const revG = safeNum(data.revenueGrowth);
-        const actual = epsG > 0 ? epsG : (revG > 0 ? revG : null);
-        const actualLabel = epsG > 0 ? 'EPS growth (TTM YoY)' : (revG > 0 ? 'revenue growth (TTM YoY, EPS growth unusable)' : null);
+        const actual = val.growth && val.growth.parts.length ? val.growth.g : null;
+        const actualLabel = actual !== null ? `sustainable growth estimate (${val.growth.source})` : null;
         let compareHtml = '';
         if (actual !== null) {
           const gap = implied - actual;
           const gapColor = Math.abs(gap) < 5 ? '#10b981' : Math.abs(gap) < 15 ? '#fbbf24' : '#ef4444';
           const verdict = gap > 15
-            ? 'The market is pricing in meaningfully faster growth than the company has recently delivered — a demanding bar to keep clearing.'
+            ? 'The market is pricing in meaningfully faster growth than the sustainable estimate — a demanding bar to keep clearing.'
             : gap > 5
-            ? 'The market is pricing in somewhat faster growth than recent actuals — a moderately optimistic bar.'
+            ? 'The market is pricing in somewhat faster growth than the sustainable estimate — a moderately optimistic bar.'
             : gap < -15
-            ? 'The market is pricing in meaningfully slower growth than recent actuals — the price may already reflect pessimism, or recent growth may not be sustainable.'
+            ? 'The market is pricing in meaningfully slower growth than the sustainable estimate — the price may already reflect pessimism.'
             : gap < -5
-            ? 'The market is pricing in somewhat slower growth than recent actuals — a conservative bar.'
-            : 'Implied growth is roughly in line with recent actual growth — the price isn\'t pricing in a major acceleration or deceleration.';
+            ? 'The market is pricing in somewhat slower growth than the sustainable estimate — a conservative bar.'
+            : 'Implied growth is roughly in line with the sustainable estimate — no major acceleration or deceleration priced in.';
           compareHtml = `<div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(148,163,184,.3);font-size:.85em;color:#1e293b;line-height:1.6;font-weight:500">
-            vs. recent ${actualLabel}: <strong style="color:#0f172a">${actual.toFixed(1)}%</strong> — gap of <strong style="color:${gapColor}">${gap>0?'+':''}${gap.toFixed(1)} pts</strong>.<br>${verdict}
+            vs. ${actualLabel}: <strong style="color:#0f172a">${actual.toFixed(1)}%</strong> — gap of <strong style="color:${gapColor}">${gap>0?'+':''}${gap.toFixed(1)} pts</strong>.<br>${verdict}
           </div>`;
         }
         return `<div style="margin-top:14px;padding:12px 14px;background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3);border-radius:10px">
         <div style="font-weight:700;font-size:.85em;margin-bottom:4px;color:#1d4ed8">🔄 Reverse DCF</div>
-        <div style="font-size:.85em;color:#1e293b;line-height:1.6;font-weight:500">At the current price, the market is pricing in <strong style="color:#0f172a">${implied.toFixed(1)}%</strong> annual FCF growth (WACC ${(val.wacc*100).toFixed(1)}%, 3% terminal growth).</div>
+        <div style="font-size:.85em;color:#1e293b;line-height:1.6;font-weight:500">At the current price, the market is pricing in <strong style="color:#0f172a">${implied.toFixed(1)}%</strong> starting FCF growth, fading to 3% over ${SA_DCF_YEARS} years (WACC ${(val.wacc*100).toFixed(1)}%).</div>
         ${compareHtml}
       </div>`;
       })()
@@ -2958,15 +3135,17 @@ function saRenderValuation(data) {
       <div class="fair-value">$${safeNum(val.fairValue).toFixed(2)}</div>
       <div class="potential">Upside: ${val.potential>0?'+':''}${safeNum(val.potential).toFixed(1)}%</div>
       <div>${rec}</div>
+      ${assumptionsHtml}
     </div>
     ${mosHtml}
     ${scenariosHtml}
+    <div id="saAnalystCard"><div style="margin-top:14px;padding:12px 14px;background:#eef2f7;border:1px solid rgba(15,23,42,.12);border-radius:10px;font-size:.82em;color:#475569">👥 Loading analyst consensus…</div></div>
     <div class="valuation-methods">
       <div class="method-title">💎 All Methods (${val.validVals.length} of 8 used)</div>
       <div class="method-row" onmouseenter=\"saShowMethodTooltip('graham')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>1. Graham Number ℹ️</span>${saMethodCell(val,'graham','graham')}</div>
       <div class="method-row" onmouseenter=\"saShowMethodTooltip('pe')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>2. P/E (${val.peMultiple}x) ℹ️</span>${saMethodCell(val,'peVal','pe')}</div>
       <div class="method-row" onmouseenter=\"saShowMethodTooltip('forwardPe')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>3. Forward P/E ℹ️</span>${saMethodCell(val,'forwardPeVal','forwardPe')}</div>
-      <div class="method-row" onmouseenter=\"saShowMethodTooltip('peg')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>4. PEG ℹ️</span>${saMethodCell(val,'pegVal','peg')}</div>
+      <div class="method-row" onmouseenter=\"saShowMethodTooltip('peg')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>4. Lynch Fair Value${val.pegVal>0?' ('+val.lynchRate.toFixed(1)+'× EPS)':''} ℹ️</span>${saMethodCell(val,'pegVal','peg')}</div>
       <div class="method-row" onmouseenter=\"saShowMethodTooltip('dcf')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>5. DCF ℹ️</span>${saMethodCell(val,'dcfVal','dcf')}</div>
       <div class="method-row" onmouseenter=\"saShowMethodTooltip('ddm')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>6. DDM ℹ️</span>${saMethodCell(val,'ddmVal','ddm')}</div>
       <div class="method-row" onmouseenter=\"saShowMethodTooltip('evEbitda')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>7. EV/EBITDA${val.evEbitdaTarget>0?' ('+val.evEbitdaTarget.toFixed(1)+'x target)':''} ℹ️</span>${saMethodCell(val,'evEbitdaVal','evEbitda')}</div>
@@ -2976,6 +3155,12 @@ function saRenderValuation(data) {
       ${reverseDcfHtml}
       <div style="margin-top:10px;font-size:.72rem;color:#64748b;line-height:1.5;padding:8px 12px;background:rgba(255,255,255,.03);border-radius:8px">ℹ️ Methodology note: this uses the same CAPM discount rate as Legendary Investors' Buffett DCF, but a different blend — 8 methods weighted by company profile (${val.profile}) vs Buffett's average of Graham # + DCF + (EPS × P/E). Expect the two tools to disagree somewhat on the same ticker.</div>
     </div>`;
+
+  saLoadAnalyst(data, val).catch(e => {
+    console.error('[saLoadAnalyst]', e);
+    const c = document.getElementById('saAnalystCard');
+    if (c) c.innerHTML = saAnalystHtml({ recNa: 'Unexpected error', ptNa: 'Unexpected error' }, 0, 0);
+  });
 
   }
   catch(e) {
@@ -3054,6 +3239,53 @@ const SA_SECTOR_PB = {
 };
 const SA_SECTOR_PB_DEFAULT = 3;
 
+// ── Sustainable growth ──────────────────────────────────────────────
+// One growth rate (percent) shared by the DCF, PEG, the P/E multiple, the
+// Bear/Base/Bull scenarios and the Reverse DCF comparison.
+// TTM YoY EPS growth is the noisiest figure Finnhub gives: a one-off in last
+// year's base (tax charge, write-down, loss-to-profit swing) prints +50% or
+// −40% that says nothing about the next decade. So the rate is the average
+// of steadier signals, each clamped to −20…+40%, with the result capped to
+// −10…+25%:
+//   • next-year EPS growth implied by consensus (forward EPS vs TTM EPS)
+//   • revenue growth — 3Y CAGR preferred, TTM YoY otherwise
+//   • EPS growth — 3Y/5Y CAGR; TTM YoY only as a last resort
+const SA_GROWTH_CAP = 25, SA_GROWTH_FLOOR = -10;
+function saSustainableGrowth(data) {
+  const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
+  const has = v => v !== null && v !== undefined && isFinite(parseFloat(v)) && parseFloat(v) !== 0;
+  const parts = [];
+  const price = safeNum(data.price), epsTTM = safeNum(data.eps), fpe = safeNum(data.forwardPE);
+  if (price > 0 && epsTTM > 0 && fpe > 0) parts.push({ g: (price / fpe / epsTTM - 1) * 100, label: 'consensus next-yr EPS' });
+  if (has(data.revenueGrowth3Y))      parts.push({ g: safeNum(data.revenueGrowth3Y), label: 'revenue 3Y CAGR' });
+  else if (has(data.revenueGrowth))   parts.push({ g: safeNum(data.revenueGrowth),   label: 'revenue TTM' });
+  // EPS-based signals only when GAAP EPS is positive — "growth" of a
+  // negative or near-zero EPS is arithmetic noise, not a business trend.
+  if (epsTTM > 0) {
+    if (has(data.epsGrowth3Y))          parts.push({ g: safeNum(data.epsGrowth3Y),     label: 'EPS 3Y CAGR' });
+    else if (has(data.epsGrowth5Y))     parts.push({ g: safeNum(data.epsGrowth5Y),     label: 'EPS 5Y CAGR' });
+    else if (parts.length < 2 && has(data.epsGrowth)) parts.push({ g: safeNum(data.epsGrowth), label: 'EPS TTM' });
+  }
+  if (!parts.length) return { g: 0, source: 'no growth data', parts };
+  parts.forEach(p => { p.gUsed = clamp(p.g, -20, 40); });
+  const g = clamp(parts.reduce((s, p) => s + p.gUsed, 0) / parts.length, SA_GROWTH_FLOOR, SA_GROWTH_CAP);
+  return { g, source: parts.map(p => p.label).join(' + '), parts };
+}
+
+// DCF horizon — shared by the forward DCF (method #5) and the Reverse DCF so
+// they always describe the same model. 10 years: a 5-year window forces even
+// a high-ROIC compounder down to GDP-level growth by year 5, which is what
+// made DCF values look far too low for names like AAPL.
+const SA_DCF_YEARS = 10;
+function saDcfPerShare(fcf, wacc, g1, terminalGrowth) {
+  let pv = 0, f = fcf;
+  for (let yr = 1; yr <= SA_DCF_YEARS; yr++) {
+    f *= 1 + (g1 - (g1 - terminalGrowth) * (yr - 1) / (SA_DCF_YEARS - 1));
+    pv += f / Math.pow(1 + wacc, yr);
+  }
+  return pv + (f * (1 + terminalGrowth)) / (wacc - terminalGrowth) / Math.pow(1 + wacc, SA_DCF_YEARS);
+}
+
 function saDetectProfile(data) {
   const pe    = safeNum(data.pe);
   const pb    = safeNum(data.pb);
@@ -3076,21 +3308,12 @@ const SA_PROFILE_WEIGHTS = {
   Blend:    { graham: 1.0, pe: 1.2, peg: 1.3, dcf: 1.5, ddm: 1.0, evEbitda: 1.2, ps: 0.8, forwardPe: 1.2 },
 };
 
-// Binary-search the constant annual FCF growth rate that makes a 5yr+terminal
-// DCF (same shape as the forward DCF below) equal to the current price —
-// i.e. "what growth is the market paying for right now".
+// Binary-search the STARTING FCF growth rate (fading to terminal growth over
+// SA_DCF_YEARS — the same shape as the forward DCF) that makes the DCF equal
+// the current price, i.e. "what growth is the market paying for right now".
 function saImpliedGrowth(price, fcf, wacc, terminalGrowth) {
   if (!(price > 0) || !(fcf > 0) || !(wacc > terminalGrowth)) return null;
-  const dcfAt = (g) => {
-    let pv = 0, f = fcf;
-    for (let yr = 1; yr <= 5; yr++) {
-      f = f * (1 + g);
-      pv += f / Math.pow(1 + wacc, yr);
-    }
-    const tv = (f * (1 + terminalGrowth)) / (wacc - terminalGrowth);
-    pv += tv / Math.pow(1 + wacc, 5);
-    return pv;
-  };
+  const dcfAt = (g) => saDcfPerShare(fcf, wacc, g, terminalGrowth);
   let lo = -0.5, hi = 2.0;
   for (let i = 0; i < 60; i++) {
     const mid = (lo + hi) / 2;
@@ -3115,6 +3338,8 @@ function saCalculateValuation(data) {
   const revPerShare   = safeNum(data.revenuePerShare);
   const fcfPerShareRaw= safeNum(data.freeCashFlowPerShare);
   const beta          = safeNum(data.beta, 1) || 1;
+  const growth        = saSustainableGrowth(data);   // { g: percent, source }
+  const gSust         = growth.g;
 
   // Reasons a method didn't produce a number — shown in the UI instead of a bare N/A.
   const reasons = {};
@@ -3131,18 +3356,24 @@ function saCalculateValuation(data) {
   const w = SA_PROFILE_WEIGHTS[profile];
 
   // 1. Graham Number — √(22.5 × EPS × Book Value)
+  // Not applicable when P/B > 10: book value has been shrunk by buybacks (or
+  // the business runs on intangibles), so a balance-sheet formula from the
+  // 1940s says nothing about value — e.g. AAPL's ~$5 book value per share.
   let graham = 0;
-  if (eps > 0 && bookValue > 0) {
+  const pbCalc = bookValue > 0 && price > 0 ? price / bookValue : 0;
+  if (eps > 0 && bookValue > 0 && pbCalc <= 10) {
     graham = Math.sqrt(22.5 * eps * bookValue);
   } else {
-    reasons.graham = eps <= 0 ? 'Negative/zero EPS (TTM & normalized)' : 'No book value per share';
+    reasons.graham = eps <= 0 ? 'Negative/zero EPS (TTM & normalized)'
+      : bookValue <= 0 ? 'No book value per share'
+      : `Not applicable — P/B ${pbCalc.toFixed(0)}×, book value shrunk by buybacks or intangibles-heavy`;
   }
 
   // 2. P/E Valuation — EPS × sector multiple
   let peMultiple = 18;
   if (data.sector === 'Technology' || data.sector === 'Semiconductors') peMultiple = 25;
-  else if (epsGrowth > 20) peMultiple = 22;
-  else if (epsGrowth > 0 && epsGrowth < 5) peMultiple = 15;
+  else if (gSust > 20) peMultiple = 22;
+  else if (gSust > 0 && gSust < 5) peMultiple = 15;
   let peVal = 0;
   if (eps > 0) peVal = eps * peMultiple;
   else reasons.pe = 'Negative/zero EPS (TTM & normalized)';
@@ -3159,31 +3390,36 @@ function saCalculateValuation(data) {
     reasons.forwardPe = 'Forward EPS estimates not available (Finnhub Free plan)';
   }
 
-  // 3. PEG — Price / (P/E / growth), with growth capped so hypergrowth
-  // TTM figures (NVDA-style 80–100%+) don't blow the fair value out to
-  // multiples of the current price.
-  // Growth input for PEG: EPS growth when it's a usable positive number,
-  // otherwise revenue growth. GAAP EPS growth is frequently negative or
-  // nonsensical right after a loss-to-profit swing (MRVL/INTC-style), even
-  // though the business is clearly growing — falling back to revenue growth
-  // keeps PEG computable instead of dropping the method entirely.
-  let pegGrowth = 0, pegGrowthSource = '';
-  if (epsGrowth > 0.5) { pegGrowth = epsGrowth; pegGrowthSource = 'EPS growth'; }
-  else if (revGrowth > 0.5) { pegGrowth = revGrowth; pegGrowthSource = 'Revenue growth (EPS growth unusable)'; }
-
+  // 3. Lynch Fair Value (the PEG = 1 method) — see below.
+  // Now: sustainable growth (see saSustainableGrowth) instead of TTM EPS
+  // growth, and P/E = price / the same EPS the P/E method uses (TTM, with the
+  // normalized fallback) so the two methods can't disagree about "the P/E".
+  // Fair value at PEG = 1 is simply EPS × growth%.
+  // Lynch Fair Value (method #4): fair P/E = growth% + dividend yield%, i.e.
+  // Peter Lynch's dividend-adjusted PEG = 1 — the same formula Legendary
+  // Investors → Lynch uses, so the two tools agree. It replaces the plain
+  // PEG method rather than sitting next to it: EPS × growth IS PEG = 1, so a
+  // separate row would count the same idea twice.
+  // Not applicable below 8% (growth + yield): Lynch used it for growth
+  // companies; for a 5% grower it implies a 5× P/E.
+  // The plain PEG ratio is still computed for display in Overview.
+  const LYNCH_MIN_RATE = 8;
+  const pegGrowth = gSust > 0.5 ? gSust : 0;
+  const pegGrowthSource = growth.source;
+  const lynchYield = price > 0 ? divPerShare / price * 100 : 0;
+  const lynchRate = pegGrowth > 0 ? pegGrowth + lynchYield : 0;
   let pegVal = 0, pegRatioEff = 0;
-  if (eps > 0 && pegGrowth > 0.5 && pe > 0) {
-    const growthCapped = Math.min(pegGrowth, 60);
-    pegRatioEff = pe / growthCapped;
-    if (isFinite(pegRatioEff) && pegRatioEff > 0) {
-      pegVal = price * (1.0 / pegRatioEff);
-    }
+  if (eps > 0 && pegGrowth > 0) pegRatioEff = (price / eps) / pegGrowth;
+  if (eps > 0 && lynchRate >= LYNCH_MIN_RATE) {
+    pegVal = eps * lynchRate;
   } else {
-    reasons.peg = eps <= 0 ? 'Negative/zero EPS' : (pegGrowth <= 0.5 ? 'No usable EPS or revenue growth' : 'P/E unavailable');
+    reasons.peg = eps <= 0 ? 'Negative/zero EPS'
+      : pegGrowth <= 0 ? 'No positive sustainable growth'
+      : `Not applicable — growth ${pegGrowth.toFixed(1)}% + yield ${lynchYield.toFixed(1)}% is below 8%; Lynch's rule would imply a ${lynchRate.toFixed(0)}× P/E`;
   }
 
-  // 4. DCF — two-stage: growth tapers linearly from a capped stage-1 rate
-  // down to a 3% terminal rate over 5 years, discounted at a CAPM-derived
+  // 4. DCF — growth fades linearly from the sustainable rate down to a 3%
+  // terminal rate over SA_DCF_YEARS (10), discounted at a CAPM-derived
   // WACC proxy (risk-free + beta × equity risk premium) instead of a fixed
   // 10%/7% assumption baked in regardless of the company's risk profile.
   const TERMINAL_G = SA_TERMINAL_G;
@@ -3194,16 +3430,11 @@ function saCalculateValuation(data) {
   if (fcfPerShareRaw > 0) fcfSource = 'Reported FCF/share (TTM)';
   else if (eps > 0) fcfSource = 'Estimated as EPS × 0.8 (FCF/share unavailable)';
 
+  // 10-year horizon; starting growth = sustainable growth (−10…+25%),
+  // fading linearly to the 3% terminal rate by year 10.
+  const dcfG1 = gSust / 100;
   if (fcfPerShare > 0) {
-    const g1 = Math.min(Math.max(Math.abs(epsGrowth || revGrowth) / 100, 0), 0.30);
-    let pv = 0, fcfProj = fcfPerShare;
-    for (let yr = 1; yr <= 5; yr++) {
-      const gYear = g1 - ((g1 - TERMINAL_G) * (yr - 1) / 4); // taper toward terminal growth
-      fcfProj = fcfProj * (1 + gYear);
-      pv += fcfProj / Math.pow(1 + wacc, yr);
-    }
-    const terminalValue = (fcfProj * (1 + TERMINAL_G)) / (wacc - TERMINAL_G);
-    pv += terminalValue / Math.pow(1 + wacc, 5);
+    const pv = saDcfPerShare(fcfPerShare, wacc, dcfG1, TERMINAL_G);
     dcfVal = isFinite(pv) && pv > 0 ? pv : 0;
   } else {
     reasons.dcf = 'No FCF/share or EPS to project cash flows from';
@@ -3215,8 +3446,13 @@ function saCalculateValuation(data) {
 
   // 5. DDM — Gordon Growth: D×(1+g)/(r-g). Naturally excluded (0 dividend)
   // for most growth names; weight is also cut for the Growth profile above.
+  // Not applicable below a 1.5% yield: the company returns cash mainly via
+  // buybacks or reinvests it, so valuing it by its dividend understates it.
   let ddmVal = 0;
-  if (divPerShare > 0 && revGrowth > 0) {
+  const divYieldPct = price > 0 ? divPerShare / price * 100 : 0;
+  if (divPerShare > 0 && divYieldPct < 1.5) {
+    reasons.ddm = `Not applicable — dividend yield ${divYieldPct.toFixed(1)}%, cash goes mainly to buybacks/reinvestment`;
+  } else if (divPerShare > 0 && revGrowth > 0) {
     const g = Math.min(revGrowth / 100, 0.06);
     const denom = 0.10 - g;
     if (denom > 0.001) ddmVal = (divPerShare * (1 + g)) / denom;
@@ -3281,14 +3517,28 @@ function saCalculateValuation(data) {
     reasons.evEbitda = 'EV/EBITDA unavailable from Finnhub and could not be computed';
   }
 
-  // 7. P/S — revenue per share × target multiple
-  let psVal = 0;
+  // 7. P/S — revenue per share × target multiple.
+  // Profitable company: the fair P/S is margin-aware — sector P/E × net
+  // margin (a 26%-margin business deserves far more than a 3%-margin one).
+  // But revenue × margin × P/E is just earnings × P/E, i.e. the P/E method
+  // again, so it is shown for reference and NOT double-counted in the blend.
+  // Loss-maker: revenue is the only thing to value, so P/S is blended with a
+  // growth-tiered target (2–5×) — the case P/S is actually meant for.
+  let psVal = 0, psRef = 0, psTarget = 0;
+  const netMargin = safeNum(data.profitMargin);
   if (priceToSales > 0 && revPerShare > 0) {
-    let tps = 2;
-    if (revGrowth > 30) tps = 5;
-    else if (revGrowth > 20) tps = 4;
-    else if (revGrowth > 10) tps = 3;
-    psVal = revPerShare * tps;
+    if (netMargin > 0 && eps > 0) {
+      const sectorPe = SA_SECTOR_PE[data.sector] || SA_SECTOR_PE_DEFAULT;
+      psTarget = sectorPe * netMargin / 100;
+      psRef = revPerShare * psTarget;
+      reasons.ps = `Ref. $${psRef.toFixed(2)} at ${psTarget.toFixed(1)}× (sector P/E ${sectorPe} × ${netMargin.toFixed(0)}% net margin) — not blended, it duplicates P/E for profitable companies`;
+    } else {
+      psTarget = 2;
+      if (revGrowth > 30) psTarget = 5;
+      else if (revGrowth > 20) psTarget = 4;
+      else if (revGrowth > 10) psTarget = 3;
+      psVal = revPerShare * psTarget;
+    }
   } else {
     reasons.ps = 'Missing P/S ratio or revenue/share';
   }
@@ -3336,7 +3586,8 @@ function saCalculateValuation(data) {
            fairValue, potential, peMultiple, validVals,
            profile, reasons, epsSource, fcfSource, evEbitdaSource,
            evToEbitdaEff, evEbitdaTarget, pegRatioEff, pegGrowthSource,
-           wacc, impliedGrowth, dispersion, fcfPerShare, price, eps, forwardEps };
+           wacc, impliedGrowth, dispersion, fcfPerShare, price, eps, forwardEps,
+           growth, dcfG1, beta, psRef, psTarget, lynchRate, lynchYield };
 }
 
 // ── Bear / Base / Bull scenario model (5-year price targets) ────────
@@ -3388,13 +3639,10 @@ function saCalculateScenarios(data, val) {
   else if (fcfRaw > 0) { base = fcfRaw; baseLabel = 'FCF/share';   fromYear = 1; }
   else return null;   // nothing positive to project from
 
-  // 2. Growth per scenario. Prefer EPS growth when it's a genuine positive
-  // number, else revenue growth (same fallback as the PEG method) — never
-  // Math.abs(), which would turn an earnings decline into fake growth.
-  const epsGrowth = safeNum(data.epsGrowth);
-  const revGrowth = safeNum(data.revenueGrowth);
-  const signal = epsGrowth > 0.5 ? epsGrowth : (revGrowth > 0.5 ? revGrowth : epsGrowth);
-  const baseG = Math.min(Math.max(signal / 100, -0.15), 0.30);
+  // 2. Growth per scenario — Base = the same sustainable growth the DCF and
+  // PEG use (see saSustainableGrowth), so all three tell one story.
+  const gs = val.growth || saSustainableGrowth(data);
+  const baseG = Math.min(Math.max(gs.g / 100, -0.15), 0.30);
   let bearG, bullG;
   if (baseG > 0) {
     bearG = Math.max(baseG * 0.35 - 0.02, -0.05);
@@ -4015,8 +4263,8 @@ async function saExportFullPDF() {
       ['Graham Number',    val.graham    > 0 ? '$' + val.graham.toFixed(2)    : 'N/A'],
       ['P/E (' + val.peMultiple + 'x)', val.peVal > 0 ? '$' + val.peVal.toFixed(2) : 'N/A'],
       ['Forward P/E',      val.forwardPeVal > 0 ? '$' + val.forwardPeVal.toFixed(2) : 'N/A'],
-      ['PEG Ratio',        val.pegVal    > 0 ? '$' + val.pegVal.toFixed(2)    : 'N/A'],
-      ['DCF (5yr, 2-stage)', val.dcfVal  > 0 ? '$' + val.dcfVal.toFixed(2)    : 'N/A'],
+      ['Lynch Fair Value', val.pegVal    > 0 ? '$' + val.pegVal.toFixed(2)    : 'N/A'],
+      ['DCF (' + SA_DCF_YEARS + '-yr)', val.dcfVal  > 0 ? '$' + val.dcfVal.toFixed(2)    : 'N/A'],
       ['DDM (Gordon)',     val.ddmVal    > 0 ? '$' + val.ddmVal.toFixed(2)    : 'N/A'],
       ['EV/EBITDA',        val.evEbitdaVal > 0 ? '$' + val.evEbitdaVal.toFixed(2) : 'N/A'],
       ['Price/Sales',      val.psVal     > 0 ? '$' + val.psVal.toFixed(2)     : 'N/A'],
@@ -4032,7 +4280,7 @@ async function saExportFullPDF() {
       ['P/E Ratio',          safeNum(d.pe) > 0 ? safeNum(d.pe).toFixed(2) + 'x' : 'N/A'],
       ['P/B Ratio',          safeNum(d.pb) > 0 ? safeNum(d.pb).toFixed(2) + 'x' : 'N/A'],
       ['EV/EBITDA',          safeNum(val.evToEbitdaEff) > 0 ? safeNum(val.evToEbitdaEff).toFixed(2) + 'x' + (val.evEbitdaSource && val.evEbitdaSource.indexOf('Finnhub') === -1 ? ' (approx.)' : '') : 'N/A'],
-      ['PEG Ratio',          safeNum(val.pegRatioEff) > 0 ? safeNum(val.pegRatioEff).toFixed(2) + (val.pegGrowthSource === 'Revenue growth (EPS growth unusable)' ? ' (rev. growth)' : '') : 'N/A'],
+      ['PEG Ratio',          safeNum(val.pegRatioEff) > 0 ? safeNum(val.pegRatioEff).toFixed(2) + ' (sust. growth ' + safeNum(val.growth && val.growth.g).toFixed(1) + '%)' : 'N/A'],
       ['ROE',                pct(d.roe)],
       ['ROIC',               pct(d.roic)],
       ['Profit Margin',      pct(d.profitMargin)],
@@ -4253,7 +4501,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Service Worker registration ───────────────────────────────
 // Bump APP_VERSION AND CACHE_NAME in sw.js together on every deploy.
 // The version check below clears old caches immediately on load.
-const APP_VERSION = '2.3';
+const APP_VERSION = '2.5';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
@@ -5523,13 +5771,25 @@ function fvCalculateCombined() {
   // PE
   const peVal=eps*spe;
   // DDM — Gordon model with the full growth rate (not arbitrarily halved),
-  // guarded against WACC being at or below the growth rate.
+  // guarded against WACC being at or below the growth rate. Same rule as
+  // Stock Analyzer: only when the dividend yield is at least 1.5% —
+  // below that the company returns cash mainly via buybacks.
+  const notes = [];
   const ddmGrowth = growth/100;
-  const ddmVal = (div>0 && wacc>ddmGrowth) ? (div*(1+ddmGrowth))/(wacc-ddmGrowth) : 0;
+  const divYieldPct = price > 0 ? div / price * 100 : 0;
+  let ddmVal = 0;
+  if (div > 0 && divYieldPct < 1.5) notes.push(`DDM skipped — dividend yield ${divYieldPct.toFixed(1)}% is too small to value the company by dividends.`);
+  else if (div > 0 && wacc > ddmGrowth) ddmVal = (div*(1+ddmGrowth))/(wacc-ddmGrowth);
+  else if (div > 0) notes.push('DDM skipped — growth is at or above WACC, so the Gordon formula has no finite value.');
   // Graham — uses the AAA bond yield entered above (Y in the classic
   // formula), NOT WACC: these are different rates, and substituting WACC
   // here (as this function previously did) understates the Graham value.
-  const grahamVal=eps*(8.5+2*growth)*(4.4/bondYield);
+  // Growth is capped at 15%: the 2g term is linear, so at 30%+ growth the
+  // formula implies a 70×+ P/E (it produced $629 for AAPL at 32.6%).
+  const GRAHAM_G_CAP = 15;
+  const grahamG = Math.min(growth, GRAHAM_G_CAP);
+  if (growth > GRAHAM_G_CAP) notes.push(`Graham formula uses growth capped at ${GRAHAM_G_CAP}% (entered ${growth}%) — above that it implies an unrealistic P/E.`);
+  const grahamVal=eps*(8.5+2*grahamG)*(4.4/bondYield);
   const validVals=[{v:dcfPerShare,w:1.5},{v:peVal,w:1.2},{v:ddmVal>0?ddmVal:null,w:1.0},{v:grahamVal,w:1.0}].filter(x=>x.v&&x.v>0&&x.v<price*5);
   const tw=validVals.reduce((a,x)=>a+x.w,0);
   const weighted=validVals.reduce((a,x)=>a+x.v*x.w,0)/tw;
@@ -5542,6 +5802,7 @@ function fvCalculateCombined() {
       <div class="fv-result-item"><div class="fv-result-label">Weighted Fair Value</div><div class="fv-result-value pur" style="font-size:1.4rem">$${weighted.toFixed(2)}</div></div>
       <div class="fv-result-item"><div class="fv-result-label">Upside/Downside</div><div class="fv-result-value ${weighted>price?'pos':'neg'}">${((weighted-price)/price*100).toFixed(1)}%</div></div>
     </div>
+    ${notes.length ? `<div style="margin-top:10px;font-size:.78rem;color:var(--fv-text2);line-height:1.55">${notes.map(n => '• ' + n).join('<br>')}</div>` : ''}
     ${fvVerdict(weighted,price)}`);
 
   }
