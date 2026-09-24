@@ -1688,7 +1688,7 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
 
       <div class="fv-bridge-bar" id="fv_bridge" style="display:none">
         <span class="fv-bridge-label">⚡ Load from Stock Analyzer:</span>
-        <span class="fv-bridge-chip" id="fv_bridge_chip" onclick="fvBridgeLoad()"></span>
+        <span class="fv-bridge-chip" id="fv_bridge_chip" onclick="fvBridgeLoad(true)"></span>
       </div>
 
       <!-- DCF -->
@@ -2361,7 +2361,7 @@ function liBridgeLoad(inv) {
   }
 }
 
-function fvBridgeLoad() {
+function fvBridgeLoad(keepTab) {
   if (!bridgeData) return;
   const d = bridgeData;
   // Same inputs as Stock Analyzer: sustainable growth (not the noisy TTM EPS
@@ -2398,15 +2398,26 @@ function fvBridgeLoad() {
   //  - Debt ($M): approximated from book value × shares × D/E, same
   //    approximation Stock Analyzer's own EV/EBITDA fallback uses — this is
   //    not a reported figure, so treat it as directional, not exact.
-  //  - Cash: not available on the Free plan; left at 0 rather than guessed.
-  if (d.marketCap > 0) bSet('fv_m_mcap', Math.round(d.marketCap / 1e6));
-  if (d.marketCap > 0 && d.evToEbitda > 0) {
-    bSet('fv_m_ebitda', Math.round((d.marketCap / d.evToEbitda) / 1e6));
+  //  - Cash: cash/share × shares when Finnhub has it, otherwise 0.
+  // Debt and cash are ALWAYS written: leaving a field untouched kept the demo
+  // value — SEZL got $20,000M of "cash", which pushed EV/EBITDA to $694/share.
+  const sharesAbs = safeNum(d.sharesOutstanding);
+  const mcapM = d.marketCap > 0 ? Math.round(d.marketCap / 1e6) : null;
+  setOrClear('fv_m_mcap', mcapM);
+  const debtM = (d.bookValue > 0 && sharesAbs > 0 && safeNum(d.debtToEquity) > 0)
+    ? Math.round(d.bookValue * sharesAbs * safeNum(d.debtToEquity) / 1e6) : 0;
+  bSet('fv_m_debt', debtM);
+  const cashM = (safeNum(d.cashPerShare) > 0 && sharesAbs > 0) ? Math.round(d.cashPerShare * sharesAbs / 1e6) : 0;
+  bSet('fv_m_cash', cashM);
+  // EBITDA: EBITDA/share × shares, else EV ÷ (EV/EBITDA). EV, not market cap —
+  // dividing market cap by an EV multiple understates EBITDA for indebted firms.
+  let ebitdaM = null;
+  if (safeNum(d.ebitdaPerShare) > 0 && sharesAbs > 0) ebitdaM = d.ebitdaPerShare * sharesAbs / 1e6;
+  else if (safeNum(d.evToEbitda) > 0 && mcapM) {
+    const evM = safeNum(d.enterpriseValue) > 0 ? d.enterpriseValue / 1e6 : mcapM + debtM - cashM;
+    ebitdaM = evM / d.evToEbitda;
   }
-  if (d.bookValue > 0 && d.sharesOutstanding > 0 && d.debtToEquity >= 0) {
-    const debtApproxM = Math.round((d.bookValue * d.sharesOutstanding * d.debtToEquity) / 1e6);
-    if (debtApproxM > 0) bSet('fv_m_debt', debtApproxM);
-  }
+  setOrClear('fv_m_ebitda', ebitdaM !== null && ebitdaM > 0 ? Math.round(ebitdaM) : null);
   // Prefill "sector average" fields from the same sector-multiple tables
   // Stock Analyzer's own valuation engine uses, instead of leaving generic
   // hardcoded defaults (35x P/E, 20x EV/EBITDA) that don't reflect the
@@ -2417,9 +2428,29 @@ function fvBridgeLoad() {
     bSet('fv_m_sps', SA_SECTOR_PS[d.sector] || SA_SECTOR_PS_DEFAULT);
     bSet('fv_m_sev', SA_SECTOR_EV_EBITDA[d.sector] || SA_SECTOR_DEFAULT_EV_EBITDA);
   }
-  fvSwitchMethod('combined');
-  // Auto-calculate Combined Analysis after all fields are set
-  setTimeout(fvCalculateCombined, 150);
+  // Stay on the tab the user is looking at when they click the chip; open
+  // Combined when arriving from the dashboard. Then calculate EVERY tab —
+  // previously only Combined ran, so DDM/Multiples/Graham looked broken.
+  const activeEl = document.querySelector('#page-fairvalue .fv-method-content.fv-method-active');
+  const activeTab = activeEl && activeEl.id ? activeEl.id.replace('fv-', '') : 'combined';
+  fvSwitchMethod(keepTab ? activeTab : 'combined');
+  setTimeout(() => fvCalculateAllBridged(d, bd), 150);
+}
+
+let fvQuiet = false;   // suppress scroll-into-view while calculating tabs in a batch
+function fvCalculateAllBridged(d, bd) {
+  fvQuiet = true;
+  try {
+    fvCalculateDCF();
+    fvCalculateMultiples();
+    fvCalculateGraham();
+    if (bd.div > 0) fvCalculateDDM();
+    else fvShowResult('fv_ddm_results', `<div class="fv-result-title">💰 DDM</div>
+      <div style="color:var(--fv-text2);font-size:.9rem;line-height:1.6">${escapeHtml(d.name || d.symbol)} doesn't pay a dividend — the Dividend Discount Model values a company only by the dividends it pays, so it doesn't apply here. Use DCF, Multiples or Graham instead.</div>`);
+    fvCalculateCombined();
+  } finally {
+    fvQuiet = false;
+  }
 }
 
 function dcfBridgeLoad() {
@@ -4501,7 +4532,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Service Worker registration ───────────────────────────────
 // Bump APP_VERSION AND CACHE_NAME in sw.js together on every deploy.
 // The version check below clears old caches immediately on load.
-const APP_VERSION = '2.5';
+const APP_VERSION = '2.5.1';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
@@ -5555,7 +5586,7 @@ function fvShowResult(id, html) {
   const el=document.getElementById(id);
   el.classList.add('visible');
   el.innerHTML=html;
-  el.scrollIntoView({behavior:'smooth',block:'nearest'});
+  if (!fvQuiet) el.scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 
 function fvVerdict(fairValue, price) {
@@ -5651,6 +5682,7 @@ function fvCalculateDDM() {
       <div class="fv-result-item"><div class="fv-result-label">Annual Dividend</div><div class="fv-result-value">$${div.toFixed(2)}</div></div>
       <div class="fv-result-item"><div class="fv-result-label">Upside/Downside</div><div class="fv-result-value ${fairValue>price?'pos':'neg'}">${((fairValue-price)/price*100).toFixed(1)}%</div></div>
     </div>
+    ${div/price*100 < 1.5 ? `<div style="margin-top:10px;font-size:.78rem;color:var(--fv-text2)">• Dividend yield ${(div/price*100).toFixed(1)}% — this company returns cash mainly through buybacks or reinvests it, so DDM understates its value (Stock Analyzer and Combined leave DDM out below 1.5%).</div>` : ''}
     ${fvVerdict(fairValue,price)}`);
 
   }
@@ -5681,21 +5713,27 @@ function fvCalculateMultiples() {
   const pe=price/eps,pb=price/book,ps=price/sales;
   const ev=mcap+debt-cash;
   const evEbitda=ev/ebitda;
-  const vPE=eps*spe,vPB=book*spb,vPS=sales*sps;
+  const vPE=eps*spe,vPS=sales*sps;
+  // Same rule as Stock Analyzer: above P/B 10 book value has been shrunk by
+  // buybacks (or the business is intangibles-heavy), so a P/B-based value
+  // means little — shown for reference, left out of the average.
+  const pbExcluded = pb > 10;
+  const vPB = book*spb;
   const shares=mcap/price;
   const vEV=ebitda>0?(ebitda*sev-debt+cash)/shares:0;
-  const vals=[vPE,vPB,vPS].filter(v=>v>0);
+  const vals=[vPE,pbExcluded?0:vPB,vPS].filter(v=>v>0);
   if(vEV>0)vals.push(vEV);
   const fairValue=vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:0;
   fvShowResult('fv_m_results',`<div class="fv-result-title">📈 Multiples Valuation</div>
     <div class="fv-result-grid">
       <div class="fv-result-item"><div class="fv-result-label">P/E Based</div><div class="fv-result-value">$${vPE.toFixed(2)}</div></div>
-      <div class="fv-result-item"><div class="fv-result-label">P/B Based</div><div class="fv-result-value">$${vPB.toFixed(2)}</div></div>
+      <div class="fv-result-item"><div class="fv-result-label">P/B Based${pbExcluded?' (ref. only)':''}</div><div class="fv-result-value"${pbExcluded?' style="opacity:.5"':''}>$${vPB.toFixed(2)}</div></div>
       <div class="fv-result-item"><div class="fv-result-label">P/S Based</div><div class="fv-result-value">$${vPS.toFixed(2)}</div></div>
       ${vEV>0?`<div class="fv-result-item"><div class="fv-result-label">EV/EBITDA Based</div><div class="fv-result-value">$${vEV.toFixed(2)}</div></div>`:''}
       <div class="fv-result-item"><div class="fv-result-label">Avg Fair Value</div><div class="fv-result-value pur">$${fairValue.toFixed(2)}</div></div>
       <div class="fv-result-item"><div class="fv-result-label">Current P/E</div><div class="fv-result-value ${pe<spe?'pos':'neg'}">${pe.toFixed(1)}x vs ${spe}x</div></div>
     </div>
+    ${pbExcluded ? `<div style="margin-top:10px;font-size:.78rem;color:var(--fv-text2)">• P/B-based left out of the average — current P/B ${pb.toFixed(0)}× means book value is shrunk by buybacks or the business is intangibles-heavy.</div>` : ''}
     ${fvVerdict(fairValue,price)}`);
 
   }
@@ -5718,18 +5756,23 @@ function fvCalculateGraham() {
     ['fv_gr_yield',  yield_ > 0 && isFinite(yield_), 'Required — enter AAA bond yield (%)'],
   ])) return;
   const mos=parseFloat(document.getElementById('fv_gr_mos').value)/100;
-  const grahamValue=eps*(8.5+2*growth)*(4.4/yield_);
+  // Same 15% growth cap as Combined → Graham, so the two tabs agree.
+  const GRAHAM_G_CAP = 15;
+  const g = Math.min(growth, GRAHAM_G_CAP);
+  const capNote = growth > GRAHAM_G_CAP ? `<div style="margin-top:10px;font-size:.78rem;color:var(--fv-text2)">• Growth capped at ${GRAHAM_G_CAP}% (entered ${growth}%) — the 2g term is linear, so above that the formula implies an unrealistic P/E.</div>` : '';
+  const grahamValue=eps*(8.5+2*g)*(4.4/yield_);
   const safePrice=grahamValue*(1-mos);
   const potential=(grahamValue-price)/price*100;
   fvShowResult('fv_gr_results',`<div class="fv-result-title">🎯 Graham Formula Results</div>
     <div class="fv-result-grid">
       <div class="fv-result-item"><div class="fv-result-label">Graham Value</div><div class="fv-result-value pur">$${grahamValue.toFixed(2)}</div></div>
       <div class="fv-result-item"><div class="fv-result-label">Safe Purchase Price</div><div class="fv-result-value">(${(mos*100).toFixed(0)}% MoS) $${safePrice.toFixed(2)}</div></div>
-      <div class="fv-result-item"><div class="fv-result-label">EPS × (8.5 + 2g)</div><div class="fv-result-value">$${(eps*(8.5+2*growth)).toFixed(2)}</div></div>
+      <div class="fv-result-item"><div class="fv-result-label">EPS × (8.5 + 2g)</div><div class="fv-result-value">$${(eps*(8.5+2*g)).toFixed(2)}</div></div>
       <div class="fv-result-item"><div class="fv-result-label">× (4.4/Y) factor</div><div class="fv-result-value">${(4.4/yield_).toFixed(3)}</div></div>
       <div class="fv-result-item"><div class="fv-result-label">Current Price</div><div class="fv-result-value">$${price.toFixed(2)}</div></div>
       <div class="fv-result-item"><div class="fv-result-label">Upside</div><div class="fv-result-value ${potential>0?'pos':'neg'}">${potential>0?'+':''}${potential.toFixed(1)}%</div></div>
     </div>
+    ${capNote}
     ${fvVerdict(grahamValue,price)}`);
 
   }
