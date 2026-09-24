@@ -2563,7 +2563,7 @@ const SA_METHOD_TOOLTIPS = {
   evEbitda:  { title:'EV/EBITDA',         formula:'Price × (Growth-Adj. Sector Target/Current)', desc:'3-tier fallback: Finnhub ratio → computed from EV & reported EBITDA → approximated from operating margin if no EBITDA figure exists at all. Sector target multiple is scaled by revenue growth (0.85×–1.35×) so a mature and a hyper-growth name in the same sector aren\'t valued at the same multiple.' },
   ps:        { title:'Price/Sales',       formula:'Revenue × Target P/S',       desc:'Revenue-based valuation' },
   mos:       { title:'Conservative Fair Value & Margin of Safety', formula:'Lowest of the surviving methods', desc:'Instead of the weighted-average Fair Value above, this takes the single most pessimistic method that still passed the sanity filters — the "if I\'m wrong, how wrong could I be" number. Margin of Safety = (Conservative Fair Value − Current Price) / Current Price. A value investor buys with room for the weighted estimate to be too optimistic; this is that room, expressed as a percentage.' },
-  scenarios: { title:'Bear / Base / Bull Scenarios', formula:'Same 5yr DCF engine, 3 growth paths', desc:'Runs the DCF method three times with different FCF growth assumptions instead of one point estimate: Bear compresses growth toward a slowdown, Base uses the reported growth rate, Bull extends it (capped). All three taper to the same 3% terminal growth and use the same CAPM WACC — only the growth path changes. PW Target blends the three by probability weight (default 25/50/25, tilted toward Bear when the 8 valuation methods already disagree sharply). 5Y CAGR is the annualized return to reach that scenario\'s target in 5 years.' }
+  scenarios: { title:'Bear / Base / Bull Scenarios', formula:'DCF_ADVANCED or EPS_PE, auto-selected', desc:'Runs three growth paths (Bear/Base/Bull) instead of one point estimate. Model is auto-selected: DCF_ADVANCED (same 5yr FCF engine as the DCF method, same CAPM WACC) when free cash flow is large enough relative to price to be representative; EPS_PE (EPS compounded forward at each scenario\'s growth rate × a scenario-adjusted exit P/E) when FCF is too thin — a capex cycle or pre-inflection name where a pure DCF would mechanically understate value. When EPS_PE uses forward EPS instead of TTM/normalized (because forward is meaningfully higher — the capex-cycle signature), growth rates are halved to avoid compounding the same earnings recovery twice. PW Target blends the three by probability weight (default 25/50/25, tilted toward Bear when the 8 valuation methods already disagree sharply). 5Y CAGR is the annualized return to reach that scenario\'s target in 5 years.' }
 };
 
 function saShowMethodTooltip(method) {
@@ -2899,10 +2899,14 @@ function saRenderValuation(data) {
             <span style="font-size:.82em;color:${color};text-align:right;font-weight:600">${s.growth>0?'+':''}${s.growth.toFixed(1)}% g</span>
             <span style="font-size:.82em;color:${color};text-align:right;font-weight:600">${s.cagr>0?'+':''}${s.cagr.toFixed(1)}%</span>
           </div>`;
+        const modelLabel = scenarios.model === 'DCF_ADVANCED' ? 'DCF' : 'EPS';
+        const modelBadge = scenarios.model === 'DCF_ADVANCED'
+          ? `<span style="opacity:.65;font-weight:500">(FCF-based DCF)</span>`
+          : `<span style="opacity:.65;font-weight:500">(EPS × P/E — FCF too thin for a DCF here${scenarios.usedForwardEps ? ', using forward EPS' : ''})</span>`;
         return `<div style="margin-top:14px;padding:12px 14px;background:#eef2f7;border:1px solid rgba(15,23,42,.12);border-radius:10px" onmouseenter="saShowMethodTooltip('scenarios')" onmousemove="saMoveTooltip(event)" onmouseleave="saHideMethodTooltip()">
-          <div style="font-weight:700;font-size:.85em;margin-bottom:6px;color:#334155">🎯 Bear / Base / Bull — 5Y Price Targets ℹ️</div>
+          <div style="font-weight:700;font-size:.85em;margin-bottom:6px;color:#334155">🎯 Bear / Base / Bull — 5Y Price Targets ℹ️ ${modelBadge}</div>
           <div style="display:grid;grid-template-columns:1.3fr .9fr .9fr .7fr;gap:8px;font-size:.68rem;color:#64748b;text-transform:uppercase;letter-spacing:.4px;padding-bottom:4px;border-bottom:1px solid rgba(148,163,184,.3)">
-            <span>Scenario</span><span style="text-align:right">Target</span><span style="text-align:right">FCF Growth</span><span style="text-align:right">5Y CAGR</span>
+            <span>Scenario</span><span style="text-align:right">Target</span><span style="text-align:right">${modelLabel} Growth</span><span style="text-align:right">5Y CAGR</span>
           </div>
           ${row('Bear', '🔴', scenarios.bear, '#ef4444')}
           ${row('Base', '🟡', scenarios.base, '#d97706')}
@@ -2911,7 +2915,7 @@ function saRenderValuation(data) {
             <span style="font-size:.85em;font-weight:700;color:#1d4ed8">PW Blended Target</span>
             <span style="font-family:'DM Mono',monospace;font-weight:700;color:#0f172a">$${scenarios.pwTarget.toFixed(2)} <span style="font-size:.8em;font-weight:600;color:${scenarios.pwUpside>0?'#10b981':'#ef4444'}">(${scenarios.pwUpside>0?'+':''}${scenarios.pwUpside.toFixed(1)}%, ${scenarios.pwCagr>0?'+':''}${scenarios.pwCagr.toFixed(1)}% CAGR)</span></span>
           </div>
-          <div style="margin-top:6px;font-size:.7rem;color:#64748b;line-height:1.4">DCF-only projection (not the same blend as Fair Value above) — for setting concrete price targets, not as a replacement for the weighted Fair Value.</div>
+          <div style="margin-top:6px;font-size:.7rem;color:#64748b;line-height:1.4">${scenarios.model === 'DCF_ADVANCED' ? 'DCF-only' : 'EPS × exit-multiple-only'} projection (not the same blend as Fair Value above) — for setting concrete price targets, not as a replacement for the weighted Fair Value.${scenarios.usedForwardEps ? ' Growth rates are halved vs. the reported figure since the forward-EPS base already prices in a recovery — compounding the full rate on top would double-count it.' : ''}</div>
         </div>`;
       })()
     : '';
@@ -3115,8 +3119,9 @@ function saCalculateValuation(data) {
   // Finnhub's Free plan usually doesn't include forward estimates, so this
   // is commonly excluded — we say why instead of a bare N/A.
   let forwardPeVal = 0;
+  let forwardEps = 0;
   if (forwardPeRatio > 0 && price > 0) {
-    const forwardEps = price / forwardPeRatio;
+    forwardEps = price / forwardPeRatio;
     if (forwardEps > 0) forwardPeVal = forwardEps * peMultiple;
   } else {
     reasons.forwardPe = 'Forward EPS estimates not available (Finnhub Free plan)';
@@ -3299,7 +3304,7 @@ function saCalculateValuation(data) {
            fairValue, potential, peMultiple, validVals,
            profile, reasons, epsSource, fcfSource, evEbitdaSource,
            evToEbitdaEff, evEbitdaTarget, pegRatioEff, pegGrowthSource,
-           wacc, impliedGrowth, dispersion, fcfPerShare, price };
+           wacc, impliedGrowth, dispersion, fcfPerShare, price, eps, forwardEps };
 }
 
 // ── Bear / Base / Bull scenario model ───────────────────────────────
@@ -3330,11 +3335,23 @@ function saRunDcfScenario(fcfPerShare, wacc, terminalGrowth, g1) {
   return isFinite(pv) && pv > 0 ? pv : 0;
 }
 
+// EPS × P/E-trajectory scenario engine — the fallback for names where FCF
+// is temporarily depressed (capex cycle) and a pure DCF would badly
+// understate value. Projects EPS forward 5 years at the scenario's growth
+// rate, then applies a target P/E (compressing/holding/expanding it by
+// scenario) to that year-5 EPS — the same "future EPS × future multiple"
+// shape as the sector P/E method above, just run forward instead of on
+// today's numbers.
+function saRunEpsPeScenario(eps, peMultiple, g, peShift) {
+  const epsYear5 = eps * Math.pow(1 + g, 5);
+  const targetPe = Math.max(peMultiple * peShift, 4); // floor so a bear case can't imply a near-zero multiple
+  const target = epsYear5 * targetPe;
+  return isFinite(target) && target > 0 ? target : 0;
+}
+
 function saCalculateScenarios(data, val) {
   const price = safeNum(data.price);
-  const fcfPerShare = val.fcfPerShare;
-  const wacc = val.wacc;
-  if (!(price > 0) || !(fcfPerShare > 0) || !(wacc > SA_TERMINAL_G)) return null;
+  if (!(price > 0)) return null;
 
   const epsGrowth = safeNum(data.epsGrowth);
   const revGrowth = safeNum(data.revenueGrowth);
@@ -3346,9 +3363,55 @@ function saCalculateScenarios(data, val) {
   const bearG = Math.max(baseG * 0.35 - 0.02, -0.05);
   const bullG = Math.min(baseG * 1.6 + 0.03, 0.50);
 
-  const bearTarget = saRunDcfScenario(fcfPerShare, wacc, SA_TERMINAL_G, bearG);
-  const baseTarget = saRunDcfScenario(fcfPerShare, wacc, SA_TERMINAL_G, baseG);
-  const bullTarget = saRunDcfScenario(fcfPerShare, wacc, SA_TERMINAL_G, bullG);
+  // Model choice: DCF_ADVANCED needs FCF that's actually meaningful relative
+  // to price (FCF yield ≥ ~1.5% of WACC's ballpark). Below that — a capex
+  // cycle, a temporarily depressed FCF, a pre-FCF-inflection name — a pure
+  // DCF mechanically produces a near-zero target no matter how the growth
+  // assumptions are tuned, because the base it compounds from is too small.
+  // EPS_PE instead compounds forward earnings and prices them off a P/E
+  // multiple, which stays representative through a capex cycle since it
+  // isn't anchored to this year's (possibly depressed) cash generation.
+  const wacc = val.wacc;
+  const fcfPerShare = val.fcfPerShare;
+  const fcfYield = (fcfPerShare > 0 && price > 0) ? fcfPerShare / price : 0;
+  const dcfUsable = fcfPerShare > 0 && wacc > SA_TERMINAL_G && fcfYield > 0.015;
+  // EPS base for the EPS_PE fallback: prefer forward EPS over TTM/normalized
+  // when it's available AND meaningfully higher — that gap is exactly the
+  // capex-cycle/earnings-inflection signature (temporarily depressed GAAP
+  // EPS while the market is already pricing in forward earnings recovery,
+  // e.g. MRVL-style AI-capex names). Falling back to TTM/normalized EPS
+  // when there's no such gap keeps this from overriding a genuinely mature,
+  // flat-earnings name with an inflated number.
+  const usedForwardEps = val.forwardEps > 0 && val.forwardEps > val.eps * 1.15;
+  const epsBase = usedForwardEps ? val.forwardEps : val.eps;
+  const epsUsable = epsBase > 0;
+
+  let model, bearTarget, baseTarget, bullTarget;
+  let bearGUsed = bearG, baseGUsed = baseG, bullGUsed = bullG;
+  if (dcfUsable) {
+    model = 'DCF_ADVANCED';
+    bearTarget = saRunDcfScenario(fcfPerShare, wacc, SA_TERMINAL_G, bearG);
+    baseTarget = saRunDcfScenario(fcfPerShare, wacc, SA_TERMINAL_G, baseG);
+    bullTarget = saRunDcfScenario(fcfPerShare, wacc, SA_TERMINAL_G, bullG);
+  } else if (epsUsable) {
+    model = 'EPS_PE';
+    // Bear also compresses the exit multiple (de-rating on top of slower
+    // growth); Bull holds/expands it modestly. Base holds today's multiple.
+    // Damping: when the base already jumped from depressed TTM EPS to
+    // forward EPS, that jump IS the recovery — the market's forward
+    // estimate already prices in the capex cycle resolving. Compounding
+    // the full reported growth rate on top of an already-recovered base
+    // double-counts the same recovery twice. Halving the growth path in
+    // this case keeps the scenario spread representing "growth after the
+    // recovery" rather than "recovery, then the same recovery again".
+    const dampen = usedForwardEps ? 0.5 : 1.0;
+    bearGUsed = bearG * dampen; baseGUsed = baseG * dampen; bullGUsed = bullG * dampen;
+    bearTarget = saRunEpsPeScenario(epsBase, val.peMultiple, bearGUsed, 0.75);
+    baseTarget = saRunEpsPeScenario(epsBase, val.peMultiple, baseGUsed, 1.00);
+    bullTarget = saRunEpsPeScenario(epsBase, val.peMultiple, bullGUsed, 1.15);
+  } else {
+    return null; // neither FCF nor EPS usable — no representative base to project
+  }
   if (!(bearTarget > 0) || !(baseTarget > 0) || !(bullTarget > 0)) return null;
 
   // Probability weights — standard 25/50/25, but tilted toward Bear when
@@ -3361,9 +3424,10 @@ function saCalculateScenarios(data, val) {
   const cagr = (target) => (Math.pow(target / price, 1 / 5) - 1) * 100;
 
   return {
-    bear: { target: bearTarget, growth: bearG * 100, weight: wBear, cagr: cagr(bearTarget) },
-    base: { target: baseTarget, growth: baseG * 100, weight: wBase, cagr: cagr(baseTarget) },
-    bull: { target: bullTarget, growth: bullG * 100, weight: wBull, cagr: cagr(bullTarget) },
+    model, usedForwardEps,
+    bear: { target: bearTarget, growth: bearGUsed * 100, weight: wBear, cagr: cagr(bearTarget) },
+    base: { target: baseTarget, growth: baseGUsed * 100, weight: wBase, cagr: cagr(baseTarget) },
+    bull: { target: bullTarget, growth: bullGUsed * 100, weight: wBull, cagr: cagr(bullTarget) },
     pwTarget, pwCagr: cagr(pwTarget),
     pwUpside: ((pwTarget - price) / price) * 100
   };
@@ -3906,7 +3970,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Service Worker registration ───────────────────────────────
 // Bump APP_VERSION AND CACHE_NAME in sw.js together on every deploy.
 // The version check below clears old caches immediately on load.
-const APP_VERSION = '2.1';
+const APP_VERSION = '2.1.1';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
