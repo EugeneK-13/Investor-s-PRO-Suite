@@ -1,8 +1,8 @@
-// sw.js — SV Pro (Stock Valuation Professional) v2.1.2
+// sw.js — SV Pro (Stock Valuation Professional) v2.3
 // GitHub Pages: https://eugenek-13.github.io/Investor-s-PRO-Suite/
 // HOW TO UPDATE: bump CACHE_NAME here AND APP_VERSION in index.html together.
 
-const CACHE_NAME = 'svpro-v2.1.2';
+const CACHE_NAME = 'svpro-v2.3';
 const BASE = '/Investor-s-PRO-Suite/';
 
 const PRECACHE_ASSETS = [

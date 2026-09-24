@@ -2422,6 +2422,24 @@ const saFetch = (path) => {
   return fetch(`${FINNHUB}${path}&token=${key}`);
 };
 
+// Finnhub's /stock/metric key names aren't fully documented and differ a
+// bit between tickers (TTM / Annual / Quarterly suffixes). Try the known
+// exact keys first, then the first key matching `re`. Returns null — not 0 —
+// when nothing is found, so checks can say "n/a" instead of mistaking a
+// missing field for a real zero (e.g. "no debt").
+function saPickMetric(m, exactKeys, re) {
+  for (const k of exactKeys) {
+    const v = parseFloat(m[k]);
+    if (isFinite(v)) return v;
+  }
+  if (re) {
+    for (const k of Object.keys(m)) {
+      if (re.test(k)) { const v = parseFloat(m[k]); if (isFinite(v)) return v; }
+    }
+  }
+  return null;
+}
+
 // ── API Key UI functions ──────────────────────────────────────────
 function saInitApiKeyUI() {
   const key = saGetApiKey();
@@ -2563,7 +2581,7 @@ const SA_METHOD_TOOLTIPS = {
   evEbitda:  { title:'EV/EBITDA',         formula:'Price × (Growth-Adj. Sector Target/Current)', desc:'3-tier fallback: Finnhub ratio → computed from EV & reported EBITDA → approximated from operating margin if no EBITDA figure exists at all. Sector target multiple is scaled by revenue growth (0.85×–1.35×) so a mature and a hyper-growth name in the same sector aren\'t valued at the same multiple.' },
   ps:        { title:'Price/Sales',       formula:'Revenue × Target P/S',       desc:'Revenue-based valuation' },
   mos:       { title:'Conservative Fair Value & Margin of Safety', formula:'Lowest of the surviving methods', desc:'Instead of the weighted-average Fair Value above, this takes the single most pessimistic method that still passed the sanity filters — the "if I\'m wrong, how wrong could I be" number. Margin of Safety = (Conservative Fair Value − Current Price) / Current Price. A value investor buys with room for the weighted estimate to be too optimistic; this is that room, expressed as a percentage.' },
-  scenarios: { title:'Bear / Base / Bull Scenarios', formula:'DCF_ADVANCED or EPS_PE, auto-selected', desc:'Runs three growth paths (Bear/Base/Bull) instead of one point estimate. Model is auto-selected: DCF_ADVANCED (same 5yr FCF engine as the DCF method, same CAPM WACC) when free cash flow is large enough relative to price to be representative; EPS_PE (EPS compounded forward at each scenario\'s growth rate × a scenario-adjusted exit P/E) when FCF is too thin — a capex cycle or pre-inflection name where a pure DCF would mechanically understate value. When EPS_PE uses forward EPS instead of TTM/normalized (the capex-cycle signature), it anchors the exit multiple to the stock\'s own current forward P/E rather than the generic sector target — so Base means "today\'s multiple holds, earnings grow as estimated" — and treats the forward figure as year 1, compounding only 4 more years so that year isn\'t re-grown twice. A ⚠️ appears when Base still lands far from the weighted Fair Value above, since the two methodologies can genuinely diverge and a large gap deserves a second look. PW Target blends the three by probability weight (default 25/50/25, tilted toward Bear when the 8 valuation methods already disagree sharply). 5Y CAGR is the annualized return to reach that scenario\'s target in 5 years.' }
+  scenarios: { title:'Bear / Base / Bull — Price in 5 Years', formula:'Year-5 earnings × exit P/E', desc:'One engine for every stock. Earnings base: forward EPS if available (already year 1, so only years 2–5 are grown), else TTM/normalized EPS, else FCF/share. Growth starts at the scenario rate and fades to 6% by year 5 (a decline fades to 0%). Exit P/E mean-reverts from the stock\'s current multiple toward its sector norm: Base = halfway, Bear = the lower of the two × 0.85, Bull = the higher. PW target weights the three 25/50/25 (35/45/20 when the valuation methods disagree sharply). 5Y CAGR is price-only. Because the targets are year-5 prices, the PW target is also shown discounted back at WACC so it can be compared like-for-like with today\'s Fair Value.' }
 };
 
 function saShowMethodTooltip(method) {
@@ -2660,6 +2678,10 @@ async function saLoadStock() {
       debtToEquity:         safeNum(m['totalDebt/totalEquityAnnual']|| m['totalDebt/totalEquityQuarterly']),
       currentRatio:         safeNum(m['currentRatioAnnual']        || m['currentRatioQuarterly']),
       quickRatio:           safeNum(m['quickRatioAnnual']          || m['quickRatioQuarterly']),
+      // Debt Safety inputs — null when Finnhub doesn't provide them (see saPickMetric)
+      debtToEquityReported: saPickMetric(m, ['totalDebt/totalEquityAnnual', 'totalDebt/totalEquityQuarterly'], null),
+      interestCoverage:     saPickMetric(m, ['netInterestCoverageTTM', 'netInterestCoverageAnnual'], /interestcoverage/i),
+      cashPerShare:         saPickMetric(m, ['cashPerSharePerShareQuarterly', 'cashPerSharePerShareAnnual'], /^cashPerShare/i),
       profitMargin:         safeNum(m['netProfitMarginTTM']        || m['netProfitMarginAnnual']),
       operatingMargin:      safeNum(m['operatingMarginTTM']        || m['operatingMarginAnnual']),
       grossMargin:          safeNum(m['grossMarginTTM']            || m['grossMarginAnnual']),
@@ -2892,42 +2914,39 @@ function saRenderValuation(data) {
   const scenarios = saCalculateScenarios(data, val);
   const scenariosHtml = scenarios
     ? (() => {
+        const cols = 'grid-template-columns:1.15fr .95fr 1fr .7fr .75fr';
         const row = (label, emoji, s, color) => `
-          <div style="display:grid;grid-template-columns:1.3fr .9fr .9fr .7fr;gap:8px;align-items:baseline;padding:8px 0;border-bottom:1px solid rgba(148,163,184,.15)">
+          <div style="display:grid;${cols};gap:8px;align-items:baseline;padding:8px 0;border-bottom:1px solid rgba(148,163,184,.15)">
             <span style="font-size:.82em;font-weight:700;color:${color}">${emoji} ${label} <span style="opacity:.65;font-weight:500">(${(s.weight*100).toFixed(0)}%)</span></span>
             <span style="font-family:'DM Mono',monospace;font-weight:700;color:#0f172a;text-align:right">$${s.target.toFixed(2)}</span>
-            <span style="font-size:.82em;color:${color};text-align:right;font-weight:600">${s.growth>0?'+':''}${s.growth.toFixed(1)}% g</span>
-            <span style="font-size:.82em;color:${color};text-align:right;font-weight:600">${s.cagr>0?'+':''}${s.cagr.toFixed(1)}%</span>
+            <span style="font-size:.8em;color:${color};text-align:right;font-weight:600">${s.growth>0?'+':''}${s.growth.toFixed(1)}% → ${s.growthEnd.toFixed(0)}%</span>
+            <span style="font-size:.8em;color:#334155;text-align:right;font-weight:600">${s.exit.toFixed(1)}×</span>
+            <span style="font-size:.8em;color:${color};text-align:right;font-weight:700">${s.cagr>0?'+':''}${s.cagr.toFixed(1)}%</span>
           </div>`;
-        const modelLabel = scenarios.model === 'DCF_ADVANCED' ? 'DCF' : 'EPS';
-        const modelBadge = scenarios.model === 'DCF_ADVANCED'
-          ? `<span style="opacity:.65;font-weight:500">(FCF-based DCF)</span>`
-          : `<span style="opacity:.65;font-weight:500">(EPS × P/E — FCF too thin for a DCF here${scenarios.usedForwardEps ? ', using forward EPS' : ''})</span>`;
-        // Divergence flag: Base and the weighted Fair Value come from
-        // genuinely different methodologies (this is a single forward-
-        // looking projection; Fair Value blends up to 8 backward- and
-        // forward-looking methods together) and can legitimately disagree
-        // — but a large gap is worth surfacing rather than leaving silent,
-        // especially since a name here typically has few surviving methods
-        // (that's exactly why EPS_PE kicked in over DCF in the first place).
         const fv = safeNum(val.fairValue);
-        const divergenceRatio = fv > 0 ? scenarios.base.target / fv : null;
-        const divergenceHtml = (divergenceRatio !== null && (divergenceRatio > 1.8 || divergenceRatio < 0.55))
-          ? `<div style="margin-top:8px;padding:8px 12px;background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.35);border-radius:8px;color:#92400e;font-size:.72rem;line-height:1.4">⚠️ Base target is ${divergenceRatio.toFixed(1)}× the weighted Fair Value above — the two use different methodologies (this is a single forward projection; Fair Value blends ${val.validVals.length} of 8 methods) and can genuinely diverge, but a gap this large is worth double-checking against the actual forward estimates before treating it as a target.</div>`
+        const ratio = (scenarios.pwToday > 0 && fv > 0) ? scenarios.pwToday / fv : null;
+        const todayLine = scenarios.pwToday > 0
+          ? `Discounted back at WACC ${(scenarios.wacc*100).toFixed(1)}%, the PW target is worth <strong style="color:#0f172a">$${scenarios.pwToday.toFixed(2)} today</strong>${fv > 0 ? ` — compare with Fair Value $${fv.toFixed(2)} above (both are today's values).` : '.'}`
           : '';
+        const divergenceHtml = (ratio !== null && (ratio > 1.6 || ratio < 0.6))
+          ? `<div style="margin-top:8px;padding:8px 12px;background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.35);border-radius:8px;color:#92400e;font-size:.72rem;line-height:1.45">⚠️ Scenario-implied value today is ${ratio.toFixed(1)}× the weighted Fair Value. The scenarios lean on one earnings figure (${scenarios.baseLabel}) and one growth rate; Fair Value blends ${val.validVals.length} of 8 methods. A gap this large usually means one of those inputs is unusual for this ticker — check it before using the targets.</div>`
+          : '';
+        const divY = safeNum(data.dividendYield);
+        const divNote = divY > 0.5 ? ` Targets are price-only; the ~${divY.toFixed(1)}% dividend yield comes on top.` : '';
         return `<div style="margin-top:14px;padding:12px 14px;background:#eef2f7;border:1px solid rgba(15,23,42,.12);border-radius:10px" onmouseenter="saShowMethodTooltip('scenarios')" onmousemove="saMoveTooltip(event)" onmouseleave="saHideMethodTooltip()">
-          <div style="font-weight:700;font-size:.85em;margin-bottom:6px;color:#334155">🎯 Bear / Base / Bull — 5Y Price Targets ℹ️ ${modelBadge}</div>
-          <div style="display:grid;grid-template-columns:1.3fr .9fr .9fr .7fr;gap:8px;font-size:.68rem;color:#64748b;text-transform:uppercase;letter-spacing:.4px;padding-bottom:4px;border-bottom:1px solid rgba(148,163,184,.3)">
-            <span>Scenario</span><span style="text-align:right">Target</span><span style="text-align:right">${modelLabel} Growth</span><span style="text-align:right">5Y CAGR</span>
+          <div style="font-weight:700;font-size:.85em;margin-bottom:2px;color:#334155">🎯 Bear / Base / Bull — Price in 5 Years ℹ️</div>
+          <div style="font-size:.72rem;color:#475569;margin-bottom:8px">Year-5 earnings × exit P/E · base: ${scenarios.baseLabel} $${scenarios.baseValue.toFixed(2)} · current multiple ${scenarios.curMultiple.toFixed(1)}× → sector ${scenarios.sectorMultiple.toFixed(0)}×</div>
+          <div style="display:grid;${cols};gap:8px;font-size:.66rem;color:#64748b;text-transform:uppercase;letter-spacing:.4px;padding-bottom:4px;border-bottom:1px solid rgba(148,163,184,.3)">
+            <span>Scenario</span><span style="text-align:right">Target (yr 5)</span><span style="text-align:right">Growth yr1→yr5</span><span style="text-align:right">Exit P/E</span><span style="text-align:right">5Y CAGR</span>
           </div>
-          ${row('Bear', '🔴', scenarios.bear, '#ef4444')}
-          ${row('Base', '🟡', scenarios.base, '#d97706')}
-          ${row('Bull', '🟢', scenarios.bull, '#10b981')}
-          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:8px;padding-top:8px;border-top:2px solid #3b82f6">
-            <span style="font-size:.85em;font-weight:700;color:#1d4ed8">PW Blended Target</span>
-            <span style="font-family:'DM Mono',monospace;font-weight:700;color:#0f172a">$${scenarios.pwTarget.toFixed(2)} <span style="font-size:.8em;font-weight:600;color:${scenarios.pwUpside>0?'#10b981':'#ef4444'}">(${scenarios.pwUpside>0?'+':''}${scenarios.pwUpside.toFixed(1)}%, ${scenarios.pwCagr>0?'+':''}${scenarios.pwCagr.toFixed(1)}% CAGR)</span></span>
+          ${row('Bear', '🔴', scenarios.bear, '#dc2626')}
+          ${row('Base', '🟡', scenarios.base, '#b45309')}
+          ${row('Bull', '🟢', scenarios.bull, '#059669')}
+          <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;margin-top:8px;padding-top:8px;border-top:2px solid #3b82f6">
+            <span style="font-size:.85em;font-weight:700;color:#1d4ed8">PW Blended Target (yr 5)</span>
+            <span style="font-family:'DM Mono',monospace;font-weight:700;color:#0f172a">$${scenarios.pwTarget.toFixed(2)} <span style="font-size:.8em;font-weight:600;color:${scenarios.pwUpside>0?'#059669':'#dc2626'}">(${scenarios.pwUpside>0?'+':''}${scenarios.pwUpside.toFixed(1)}%, ${scenarios.pwCagr>0?'+':''}${scenarios.pwCagr.toFixed(1)}%/yr)</span></span>
           </div>
-          <div style="margin-top:6px;font-size:.7rem;color:#64748b;line-height:1.4">${scenarios.model === 'DCF_ADVANCED' ? 'DCF-only' : 'EPS × exit-multiple-only'} projection (not the same blend as Fair Value above) — for setting concrete price targets, not as a replacement for the weighted Fair Value.${scenarios.usedForwardEps ? ' Uses the forward EPS estimate as year 1 and compounds 4 more years to reach the 5-year horizon — not 5 full years on top of it, which would double-count the year the forward estimate already covers.' : ''}</div>
+          <div style="margin-top:6px;font-size:.72rem;color:#475569;line-height:1.45">${todayLine}${divNote}</div>
           ${divergenceHtml}
         </div>`;
       })()
@@ -3320,155 +3339,109 @@ function saCalculateValuation(data) {
            wacc, impliedGrowth, dispersion, fcfPerShare, price, eps, forwardEps };
 }
 
-// ── Bear / Base / Bull scenario model ───────────────────────────────
-// Runs the SAME 5yr two-stage DCF engine as the main DCF method above,
-// three times, with different stage-1 growth assumptions instead of one
-// point estimate. Gives a probability-weighted (PW) blended target and
-// implied 5Y CAGR per scenario — useful for setting concrete price targets
-// rather than reading a single "fair value" number as if it were certain.
+// ── Bear / Base / Bull scenario model (5-year price targets) ────────
+// ONE engine for every stock:  Year-5 price = Year-5 earnings × exit P/E.
 //
-// Growth for each scenario, in order of preference:
-//   1. Reported forward-looking growth (epsGrowth/revGrowth) as the Base case
-//   2. Bear = Base compressed toward 0 (and floored at -5%) — a demand shock
-//      or margin compression case, not a full DCF-implied worst case.
-//   3. Bull = Base extended, capped at 50% stage-1 growth — an execution/
-//      re-rating upside case, not a "everything goes right forever" fantasy.
-// All three still taper to the same 3% terminal growth over 5 years and
-// discount at the same CAPM WACC, so the spread reflects growth assumptions
-// only, not a change in discount rate or terminal assumptions.
-function saRunDcfScenario(fcfPerShare, wacc, terminalGrowth, g1) {
-  let pv = 0, fcfProj = fcfPerShare;
-  for (let yr = 1; yr <= 5; yr++) {
-    const gYear = g1 - ((g1 - terminalGrowth) * (yr - 1) / 4);
-    fcfProj = fcfProj * (1 + gYear);
-    pv += fcfProj / Math.pow(1 + wacc, yr);
-  }
-  const terminalValue = (fcfProj * (1 + terminalGrowth)) / (wacc - terminalGrowth);
-  pv += terminalValue / Math.pow(1 + wacc, 5);
-  return isFinite(pv) && pv > 0 ? pv : 0;
-}
+// Why one engine: an earlier version switched between a DCF branch and an
+// EPS×P/E branch. The DCF branch returned a PRESENT value (what the stock
+// is worth today) while the EPS branch returned a FUTURE year-5 price —
+// yet both were labelled "5Y target" and fed into a 5Y CAGR. That mixed two
+// different kinds of number, so DCF names (SEZL, MRVL) looked far too low
+// and EPS names (INTC) looked too high vs Fair Value. The DCF itself stays
+// where it belongs: method #5 in All Methods (value today) and Reverse DCF.
+//
+// Moving parts, all per-stock:
+//  • Earnings base — forward EPS if available (already = year 1, so only
+//    years 2–5 are grown), else TTM/normalized EPS, else FCF/share.
+//  • Growth — starts at the scenario rate and fades linearly to a 6%
+//    long-run rate by year 5 (a decline fades toward 0%), so a 30% grower
+//    isn't extrapolated at 30% for five straight years.
+//  • Exit multiple — mean-reverts from the stock's CURRENT multiple toward
+//    its sector norm: Base = halfway, Bear = the lower of the two × 0.85,
+//    Bull = the higher of the two. Current multiple is clamped to 5–60× so
+//    a depressed-earnings 600× P/E can't be carried forward.
+const SA_SCEN_YEARS = 5;
+const SA_SCEN_LR_GROWTH = 0.06;
+const SA_SCEN_PE_FLOOR = 5, SA_SCEN_PE_CAP = 60;
 
-// EPS × P/E-trajectory scenario engine — the fallback for names where FCF
-// is temporarily depressed (capex cycle) and a pure DCF would badly
-// understate value. Projects EPS forward from `eps` at the scenario's
-// growth rate for `years` periods, then applies a target P/E (compressing/
-// holding/expanding it by scenario) to that final-year EPS — the same
-// "future EPS × future multiple" shape as the sector P/E method above,
-// just run forward instead of on today's numbers.
-//
-// `years` matters: when `eps` here is TTM/normalized (today's actual
-// earnings), a full 5 years of growth to reach "year 5" is correct. But
-// when `eps` is already the market's forward (~year-1) estimate, that
-// estimate already IS year 1 of the growth path — compounding a full 5
-// more years on top double-counts year 1. Callers pass years=4 in that
-// case so the projection lands on the same year-5 horizon without
-// re-growing the year already baked into the forward estimate.
-function saRunEpsPeScenario(eps, peMultiple, g, peShift, years) {
-  const epsYearN = eps * Math.pow(1 + g, years);
-  const targetPe = Math.max(peMultiple * peShift, 4); // floor so a bear case can't imply a near-zero multiple
-  const target = epsYearN * targetPe;
-  return isFinite(target) && target > 0 ? target : 0;
+// Cumulative growth factor from `fromYear` through year 5 on a linear fade.
+function saScenarioGrowthFactor(gStart, fromYear) {
+  const gEnd = gStart < 0 ? 0 : Math.min(gStart, SA_SCEN_LR_GROWTH);
+  let f = 1;
+  for (let yr = fromYear; yr <= SA_SCEN_YEARS; yr++) {
+    f *= 1 + (gStart - (gStart - gEnd) * (yr - 1) / (SA_SCEN_YEARS - 1));
+  }
+  return f;
 }
 
 function saCalculateScenarios(data, val) {
   const price = safeNum(data.price);
   if (!(price > 0)) return null;
 
+  // 1. Earnings base
+  const fwdEps = safeNum(val.forwardEps);
+  const eps    = safeNum(val.eps);
+  const fcfRaw = safeNum(data.freeCashFlowPerShare);
+  let base, baseLabel, fromYear;
+  if (fwdEps > 0)      { base = fwdEps; baseLabel = 'forward EPS'; fromYear = 2; }
+  else if (eps > 0)    { base = eps;    baseLabel = val.epsSource === 'Normalized' ? 'normalized EPS' : 'TTM EPS'; fromYear = 1; }
+  else if (fcfRaw > 0) { base = fcfRaw; baseLabel = 'FCF/share';   fromYear = 1; }
+  else return null;   // nothing positive to project from
+
+  // 2. Growth per scenario. Prefer EPS growth when it's a genuine positive
+  // number, else revenue growth (same fallback as the PEG method) — never
+  // Math.abs(), which would turn an earnings decline into fake growth.
   const epsGrowth = safeNum(data.epsGrowth);
   const revGrowth = safeNum(data.revenueGrowth);
-  // Growth signal for Base: prefer EPS growth when it's a genuine positive
-  // number; GAAP EPS growth is frequently negative or a meaningless
-  // artifact right after a loss-to-profit swing or heavy amortization
-  // (MRVL-style names), even though the underlying business is growing
-  // fine — same fallback the PEG method already uses. Using Math.abs()
-  // here would be wrong: it would flip a real earnings DECLINE into a
-  // fake positive growth rate instead of falling back to a better signal.
-  const growthSignal = epsGrowth > 0.5 ? epsGrowth : (revGrowth > 0.5 ? revGrowth : epsGrowth);
-  const baseG = Math.min(Math.max(growthSignal / 100, -0.15), 0.30);
-
-  // Bear: compress growth toward zero (never below -5%) — a slowdown, not
-  // a collapse. Bull: extend growth, capped so a single hypergrowth year
-  // doesn't get naively extrapolated for 5 years straight.
-  const bearG = Math.max(baseG * 0.35 - 0.02, -0.05);
-  const bullG = Math.min(baseG * 1.6 + 0.03, 0.50);
-
-  // Model choice: DCF_ADVANCED needs FCF that's actually meaningful relative
-  // to price (FCF yield ≥ ~1.5% of WACC's ballpark). Below that — a capex
-  // cycle, a temporarily depressed FCF, a pre-FCF-inflection name — a pure
-  // DCF mechanically produces a near-zero target no matter how the growth
-  // assumptions are tuned, because the base it compounds from is too small.
-  // EPS_PE instead compounds forward earnings and prices them off a P/E
-  // multiple, which stays representative through a capex cycle since it
-  // isn't anchored to this year's (possibly depressed) cash generation.
-  const wacc = val.wacc;
-  const fcfPerShare = val.fcfPerShare;
-  const fcfYield = (fcfPerShare > 0 && price > 0) ? fcfPerShare / price : 0;
-  const dcfUsable = fcfPerShare > 0 && wacc > SA_TERMINAL_G && fcfYield > 0.015;
-  // EPS base for the EPS_PE fallback: prefer forward EPS over TTM/normalized
-  // when it's available AND meaningfully higher — that gap is exactly the
-  // capex-cycle/earnings-inflection signature (temporarily depressed GAAP
-  // EPS while the market is already pricing in forward earnings recovery,
-  // e.g. MRVL-style AI-capex names). Falling back to TTM/normalized EPS
-  // when there's no such gap keeps this from overriding a genuinely mature,
-  // flat-earnings name with an inflated number.
-  const usedForwardEps = val.forwardEps > 0 && val.forwardEps > val.eps * 1.15;
-  const epsBase = usedForwardEps ? val.forwardEps : val.eps;
-  const epsUsable = epsBase > 0;
-  // Anchor multiple: when using forward EPS, anchor Base to the multiple the
-  // market is ALREADY paying on that same forward estimate (price / forward
-  // EPS — i.e. data.forwardPE), not the generic sector-target multiple.
-  // Sector peMultiple is calibrated for the plain P/E method (trailing EPS
-  // vs a sector norm); applying it on top of an already-forward EPS mixes
-  // two different reference points and inflates Base even with 0% growth
-  // whenever the sector target happens to sit above the stock's actual
-  // current forward P/E. Anchoring to the real forward P/E makes Base mean
-  // what it should: "today's multiple holds, earnings grow as estimated."
-  const forwardPeRatio = safeNum(data.forwardPE);
-  const anchorPe = (usedForwardEps && forwardPeRatio > 0) ? forwardPeRatio : val.peMultiple;
-
-  let model, bearTarget, baseTarget, bullTarget;
-  let bearGUsed = bearG, baseGUsed = baseG, bullGUsed = bullG;
-  if (dcfUsable) {
-    model = 'DCF_ADVANCED';
-    bearTarget = saRunDcfScenario(fcfPerShare, wacc, SA_TERMINAL_G, bearG);
-    baseTarget = saRunDcfScenario(fcfPerShare, wacc, SA_TERMINAL_G, baseG);
-    bullTarget = saRunDcfScenario(fcfPerShare, wacc, SA_TERMINAL_G, bullG);
-  } else if (epsUsable) {
-    model = 'EPS_PE';
-    // Bear also compresses the exit multiple (de-rating on top of slower
-    // growth); Bull holds/expands it modestly. Base holds today's multiple.
-    // Horizon: when epsBase is TTM/normalized (today's actual earnings),
-    // it's "year 0" and needs 5 full years of growth to reach the year-5
-    // horizon. When epsBase is forward EPS, that figure already IS year 1
-    // of the growth path (the market's own ~12-month-ahead estimate) — so
-    // only 4 more years of compounding are needed to reach the same
-    // year-5 horizon. Using 5 years on top of an already-forward number
-    // would re-grow the year the estimate already covers.
-    const years = usedForwardEps ? 4 : 5;
-    bearTarget = saRunEpsPeScenario(epsBase, anchorPe, bearGUsed, 0.75, years);
-    baseTarget = saRunEpsPeScenario(epsBase, anchorPe, baseGUsed, 1.00, years);
-    bullTarget = saRunEpsPeScenario(epsBase, anchorPe, bullGUsed, 1.15, years);
+  const signal = epsGrowth > 0.5 ? epsGrowth : (revGrowth > 0.5 ? revGrowth : epsGrowth);
+  const baseG = Math.min(Math.max(signal / 100, -0.15), 0.30);
+  let bearG, bullG;
+  if (baseG > 0) {
+    bearG = Math.max(baseG * 0.35 - 0.02, -0.05);
+    bullG = Math.min(baseG * 1.35 + 0.02, 0.45);
   } else {
-    return null; // neither FCF nor EPS usable — no representative base to project
+    bearG = Math.max(baseG - 0.05, -0.20);
+    bullG = baseG / 3 + 0.04;
   }
-  if (!(bearTarget > 0) || !(baseTarget > 0) || !(bullTarget > 0)) return null;
 
-  // Probability weights — standard 25/50/25, but tilted toward Bear when
-  // the stock's own valuation methods already disagree sharply (dispersion),
-  // since a high-dispersion setup means more can plausibly go wrong.
+  // 3. Exit multiples
+  const curMultiple = Math.min(Math.max(price / base, SA_SCEN_PE_FLOOR), SA_SCEN_PE_CAP);
+  const sectorMultiple = SA_SECTOR_PE[data.sector] || SA_SECTOR_PE_DEFAULT;
+  const exits = {
+    bear: Math.max(Math.min(curMultiple, sectorMultiple) * 0.85, SA_SCEN_PE_FLOOR),
+    base: (curMultiple + sectorMultiple) / 2,
+    bull: Math.max(curMultiple, sectorMultiple),
+  };
+
+  const cagr = (t) => (Math.pow(t / price, 1 / SA_SCEN_YEARS) - 1) * 100;
+  const mk = (g, exit) => {
+    const earnings5 = base * saScenarioGrowthFactor(g, fromYear);
+    const target = earnings5 * exit;
+    return { target, growth: g * 100, growthEnd: (g < 0 ? 0 : Math.min(g, SA_SCEN_LR_GROWTH)) * 100,
+             exit, earnings5, cagr: cagr(target) };
+  };
+  const bear = mk(bearG, exits.bear), baseS = mk(baseG, exits.base), bull = mk(bullG, exits.bull);
+  if (![bear, baseS, bull].every(s => isFinite(s.target) && s.target > 0)) return null;
+
+  // 4. Probability weights — 25/50/25, tilted toward Bear when the valuation
+  // methods already disagree sharply (more can plausibly go wrong).
   let wBear = 0.25, wBase = 0.50, wBull = 0.25;
   if (val.dispersion && val.dispersion.high) { wBear = 0.35; wBase = 0.45; wBull = 0.20; }
+  bear.weight = wBear; baseS.weight = wBase; bull.weight = wBull;
+  const pwTarget = bear.target * wBear + baseS.target * wBase + bull.target * wBull;
 
-  const pwTarget = bearTarget * wBear + baseTarget * wBase + bullTarget * wBull;
-  const cagr = (target) => (Math.pow(target / price, 1 / 5) - 1) * 100;
+  // 5. Like-for-like check vs Fair Value: Fair Value is a TODAY number, the
+  // PW target is a YEAR-5 number, so discount the PW target back at WACC
+  // before comparing. (Comparing them raw is apples to oranges.)
+  const wacc = val.wacc;
+  const pwToday = wacc > 0 ? pwTarget / Math.pow(1 + wacc, SA_SCEN_YEARS) : null;
 
   return {
-    model, usedForwardEps,
-    bear: { target: bearTarget, growth: bearGUsed * 100, weight: wBear, cagr: cagr(bearTarget) },
-    base: { target: baseTarget, growth: baseGUsed * 100, weight: wBase, cagr: cagr(baseTarget) },
-    bull: { target: bullTarget, growth: bullGUsed * 100, weight: wBull, cagr: cagr(bullTarget) },
+    baseLabel, baseValue: base, curMultiple, sectorMultiple,
+    bear, base: baseS, bull,
     pwTarget, pwCagr: cagr(pwTarget),
-    pwUpside: ((pwTarget - price) / price) * 100
+    pwUpside: ((pwTarget - price) / price) * 100,
+    pwToday, wacc
   };
 }
 
@@ -3573,6 +3546,247 @@ function saRenderFinancials(data) {
   }
 }
 
+// ══ Debt Safety check ═══════════════════════════════════════════════
+// None of the 8 valuation methods look at leverage, so a heavily indebted
+// company can look "cheap" on P/E or EV/EBITDA. This is a separate pass/
+// fail-style check, not a 9th method in the blend.
+// Scores: 3 = strong, 2 = ok, 1 = weak, 0 = critical, null = not scored.
+const SA_FINANCIAL_SECTORS = /bank|financial|insurance/i;
+
+function saDebtSafety(data) {
+  const shares = safeNum(data.sharesOutstanding);
+  const bv     = safeNum(data.bookValue);
+  const cr     = safeNum(data.currentRatio);
+  const om     = safeNum(data.operatingMargin);
+  // D/E: prefer the "was it actually reported" field; older saved data
+  // objects don't have it, so fall back to the plain field (0 = unknown).
+  const deRep  = data.debtToEquityReported;
+  const deKnown = deRep !== null && deRep !== undefined ? true : safeNum(data.debtToEquity) > 0;
+  const de     = deRep !== null && deRep !== undefined ? safeNum(deRep) : safeNum(data.debtToEquity);
+  const ic     = (data.interestCoverage === null || data.interestCoverage === undefined) ? null : safeNum(data.interestCoverage);
+  const cashPS = (data.cashPerShare === null || data.cashPerShare === undefined) ? null : safeNum(data.cashPerShare);
+  const isFinancial = SA_FINANCIAL_SECTORS.test(data.sector || '');
+
+  const hi = (v, t) => v >= t[0] ? 3 : v >= t[1] ? 2 : v >= t[2] ? 1 : 0;   // higher is better
+  const lo = (v, t) => v <= t[0] ? 3 : v <= t[1] ? 2 : v <= t[2] ? 1 : 0;   // lower is better
+
+  const equity    = bv * shares;
+  const totalDebt = (deKnown && bv > 0 && shares > 0) ? de * equity : null;
+  const noDebt    = totalDebt === 0;
+  const ebitdaPS  = safeNum(data.ebitdaPerShare);
+  const ev        = safeNum(data.enterpriseValue);
+  const evE       = safeNum(data.evToEbitda);
+  const ebitda    = (ebitdaPS !== 0 && shares > 0) ? ebitdaPS * shares : (ev > 0 && evE > 0 ? ev / evE : null);
+  const cash      = (cashPS !== null && shares > 0) ? cashPS * shares : null;
+
+  const rows = [];
+  // 1. Interest coverage (EBIT / interest)
+  if (noDebt) rows.push({ name: 'Interest coverage', value: 'no debt', score: 3 });
+  else if (ic === null) rows.push({ name: 'Interest coverage', value: 'N/A', score: null, note: 'not provided by Finnhub for this ticker' });
+  else if (ic < 0 && om > 0) rows.push({ name: 'Interest coverage', value: 'net interest income', score: 3, note: 'interest earned on cash exceeds interest paid' });
+  else if (ic < 0) rows.push({ name: 'Interest coverage', value: ic.toFixed(1) + '×', score: 0, note: 'operating profit is negative — interest is not covered' });
+  else rows.push({ name: 'Interest coverage', value: ic.toFixed(1) + '×', score: hi(ic, [8, 3, 1.5]), note: '≥8× strong · <1.5× critical' });
+
+  // 2. Net debt / EBITDA (gross debt / EBITDA when cash isn't available)
+  if (noDebt) rows.push({ name: 'Net debt / EBITDA', value: 'no debt', score: 3 });
+  else if (totalDebt === null) rows.push({ name: 'Net debt / EBITDA', value: 'N/A', score: null, note: bv <= 0 ? 'negative book equity — debt can\'t be derived' : 'debt not reported' });
+  else if (ebitda === null) rows.push({ name: 'Net debt / EBITDA', value: 'N/A', score: null, note: 'EBITDA not available for this ticker' });
+  else if (!(ebitda > 0)) rows.push({ name: 'Net debt / EBITDA', value: 'EBITDA ≤ 0', score: 0, note: 'debt isn\'t being serviced from operations' });
+  else if (cash !== null) {
+    const net = totalDebt - cash;
+    if (net <= 0) rows.push({ name: 'Net debt / EBITDA', value: 'net cash', score: 3, note: `cash ${saFormatBigNumber(cash)} > debt ${saFormatBigNumber(totalDebt)}` });
+    else { const r = net / ebitda; rows.push({ name: 'Net debt / EBITDA', value: r.toFixed(1) + '×', score: lo(r, [1, 2.5, 4]), note: '≤1× strong · >4× critical' }); }
+  } else {
+    const r = totalDebt / ebitda;
+    rows.push({ name: 'Debt / EBITDA (gross)', value: r.toFixed(1) + '×', score: lo(r, [1.5, 3, 5]), note: 'cash not provided, so gross debt is used' });
+  }
+
+  // 3. Debt / Equity
+  if (bv < 0) rows.push({ name: 'Debt / Equity', value: 'N/A', score: null, note: 'negative equity (often buyback-driven) — D/E isn\'t meaningful' });
+  else if (!deKnown) rows.push({ name: 'Debt / Equity', value: 'N/A', score: null, note: 'not reported' });
+  else rows.push({ name: 'Debt / Equity', value: de.toFixed(2), score: lo(de, [0.5, 1.5, 3]), note: '<0.5 strong · >3 critical' });
+
+  // 4. Current ratio (short-term liquidity)
+  if (cr > 0) rows.push({ name: 'Current ratio', value: cr.toFixed(2), score: hi(cr, [1.5, 1.0, 0.7]), note: '≥1.5 strong · <0.7 critical' });
+  else rows.push({ name: 'Current ratio', value: 'N/A', score: null, note: 'not reported' });
+
+  if (isFinancial) {
+    rows.forEach(r => { r.score = null; });
+    return { rows, verdict: 'Not applicable', color: '#64748b',
+             summary: 'Lenders and insurers borrow to fund their loan book — debt is raw material, so these thresholds don\'t apply. Judge them by capital ratios and credit losses (not available on Finnhub\'s free plan). Figures shown for reference only.' };
+  }
+
+  const scored = rows.filter(r => r.score !== null);
+  if (scored.length < 2) return { rows, verdict: 'Insufficient data', color: '#64748b', summary: 'Fewer than 2 debt metrics are available for this ticker.' };
+  const avg = scored.reduce((s, r) => s + r.score, 0) / scored.length;
+  let verdict = avg >= 2.5 ? 'Strong' : avg >= 1.75 ? 'Adequate' : avg >= 1 ? 'Weak' : 'Critical';
+  const anyCritical = scored.some(r => r.score === 0);
+  if (anyCritical && (verdict === 'Strong' || verdict === 'Adequate')) verdict = 'Weak';
+  const color = { Strong: '#10b981', Adequate: '#10b981', Weak: '#f59e0b', Critical: '#ef4444' }[verdict];
+  const summary = anyCritical
+    ? 'At least one metric is in the critical zone — valuation upside is less reliable when the balance sheet is stretched.'
+    : verdict === 'Weak' ? 'Leverage is elevated — check debt maturities and refinancing needs before relying on the valuation.'
+    : 'Balance sheet doesn\'t undermine the valuation.';
+  return { rows, verdict, color, summary, scoredCount: scored.length };
+}
+
+// ══ Burry SBC check ═════════════════════════════════════════════════
+// Stock-based compensation is a real cost to shareholders (dilution, or
+// cash spent on buybacks to offset it), but free cash flow adds it back.
+// So FCF-based valuations overstate value for heavy-SBC companies.
+// GAAP EPS already expenses SBC; FCF does not. SBC isn't in /stock/metric,
+// so it's read from the latest 10-K via /stock/financials-reported (one
+// extra request per ticker, cached for the session). US SEC filers only.
+const saSbcCache = {};
+
+function saReportItems(section) {
+  if (Array.isArray(section)) return section;
+  if (section && typeof section === 'object') return Object.values(section);
+  return [];
+}
+
+// Pull SBC, operating cash flow and capex out of one as-reported filing.
+// Concept names vary between companies, so match by concept, then label.
+function saExtractSbc(filing) {
+  const rep = (filing && filing.report) || {};
+  const cf  = saReportItems(rep.cf);
+  const all = cf.concat(saReportItems(rep.ic));
+  const usd = it => it && isFinite(parseFloat(it.value)) && (!it.unit || /usd/i.test(it.unit));
+  const find = (items, conceptRes, labelRe) => {
+    for (const re of conceptRes) {
+      const hit = items.find(it => usd(it) && re.test(String(it.concept || '')));
+      if (hit) return parseFloat(hit.value);
+    }
+    if (labelRe) {
+      const hit = items.find(it => usd(it) && labelRe.test(String(it.label || '')));
+      if (hit) return parseFloat(hit.value);
+    }
+    return null;
+  };
+  let sbc = find(cf, [/(^|_|:)ShareBasedCompensation$/i, /AllocatedShareBasedCompensationExpense$/i, /StockBasedCompensation$/i],
+                 /(stock|share|equity)[- ]based compensation/i);
+  if (sbc === null) sbc = find(all, [/AllocatedShareBasedCompensationExpense$/i, /(^|_|:)ShareBasedCompensation$/i], null);
+  const ocf = find(cf, [/NetCashProvidedByUsedInOperatingActivities$/i, /NetCashProvidedByUsedInOperatingActivitiesContinuingOperations$/i],
+                   /net cash (provided by|from|provided by \(used in\)) operating activities/i);
+  let capex = find(cf, [/PaymentsToAcquirePropertyPlantAndEquipment$/i, /PaymentsToAcquireProductiveAssets$/i, /PaymentsForCapitalImprovements$/i],
+                   /(purchases? of|payments for|acquisition of) property(,| and)? (plant|equipment)|capital expenditures/i);
+  return { sbc, ocf, capex: capex === null ? null : Math.abs(capex) };
+}
+
+async function saFetchSbc(symbol) {
+  if (saSbcCache[symbol]) return saSbcCache[symbol];
+  const keep = r => (saSbcCache[symbol] = r);
+  let res;
+  try { res = await saFetch(`/stock/financials-reported?symbol=${encodeURIComponent(symbol)}&freq=annual`); }
+  catch (e) { return { na: 'Network error while fetching the annual report — try reloading' }; }   // not cached
+  if (res.status === 401 || res.status === 403) return keep({ na: 'Financials-as-reported isn\'t available on your Finnhub plan' });
+  if (res.status === 429) return { na: 'Finnhub rate limit reached — reload in a minute' };            // not cached
+  if (!res.ok) return { na: `Finnhub error (HTTP ${res.status})` };
+  let json = null;
+  try { json = await res.json(); } catch (e) { /* handled below */ }
+  const filings = (json && Array.isArray(json.data) ? json.data : [])
+    .slice().sort((a, b) => String(b.endDate || b.year || '').localeCompare(String(a.endDate || a.year || '')));
+  if (!filings.length) return keep({ na: 'No SEC filings on Finnhub for this ticker (usually a non-US listing)' });
+  // Latest filing that actually tags SBC — look back at most 2 years.
+  for (const f of filings.slice(0, 2)) {
+    const x = saExtractSbc(f);
+    if (x.sbc !== null && x.sbc > 0) {
+      return keep({ sbc: x.sbc, ocf: x.ocf, capex: x.capex, year: f.year, form: f.form || '10-K', endDate: f.endDate });
+    }
+  }
+  return keep({ na: 'No stock-based compensation line found in the latest annual filings', zero: true });
+}
+
+// Turn the fetched filing numbers into the check's verdict. Pure function
+// (no DOM) so it can be tested in isolation.
+function saBurryAssess(data, val, r) {
+  if (!r || r.na) return { na: (r && r.na) || 'Not available' };
+  const out = { year: r.year, form: r.form, sbc: r.sbc };
+  const shares = safeNum(data.sharesOutstanding);
+  const fcfFiling = (r.ocf !== null && r.ocf !== undefined) ? r.ocf - (r.capex || 0) : null;
+  out.fcfFiling = fcfFiling;
+  out.capexMissing = r.capex === null || r.capex === undefined;
+  // Share of FCF eaten by SBC — from the SAME filing, so periods match.
+  // Fallback when OCF isn't tagged: SBC/share vs Finnhub's TTM FCF/share.
+  const fcfPSttm = safeNum(data.freeCashFlowPerShare);
+  let pct = null, basis = '';
+  if (fcfFiling !== null && fcfFiling > 0) { pct = r.sbc / fcfFiling * 100; basis = 'same filing'; }
+  else if (fcfFiling === null && fcfPSttm > 0 && shares > 0) { pct = (r.sbc / shares) / fcfPSttm * 100; basis = 'TTM FCF vs 10-K SBC'; }
+  out.pct = pct; out.basis = basis;
+
+  if (fcfFiling !== null && fcfFiling <= 0) {
+    out.verdict = 'FCF negative'; out.cls = 'fail';
+    out.summary = 'Free cash flow was negative even before counting SBC — SBC adds dilution on top of cash burn.';
+  } else if (pct === null) {
+    out.verdict = 'Partial'; out.cls = '';
+    out.summary = 'SBC was found but free cash flow couldn\'t be matched to it, so the overstatement can\'t be sized.';
+  } else {
+    out.verdict = pct < 10 ? 'Low' : pct < 25 ? 'Moderate' : pct < 50 ? 'High' : 'Severe';
+    out.cls = pct < 10 ? 'pass' : pct < 50 ? 'hold' : 'fail';
+    out.summary = pct < 10 ? 'SBC is a small share of FCF — reported FCF is a fair measure of owner earnings.'
+      : pct < 25 ? 'SBC is a noticeable share of FCF — FCF-based valuations are somewhat flattered.'
+      : pct < 50 ? 'SBC eats a large share of FCF — FCF-based valuations overstate what shareholders actually keep.'
+      : 'SBC consumes most of FCF — reported FCF is a poor measure of owner earnings here.';
+  }
+
+  // FCF/share after SBC and the DCF impact. DCF (method #5) is linear in
+  // its starting FCF, so scaling by (1 − SBC/FCF) gives the exact re-run.
+  if (pct !== null && fcfPSttm > 0) {
+    out.fcfPS = fcfPSttm;
+    out.fcfPSadj = fcfPSttm * (1 - pct / 100);
+  }
+  if (val && val.dcfVal > 0 && /Reported FCF/.test(val.fcfSource || '') && pct !== null) {
+    const factor = 1 - pct / 100;
+    out.dcfBefore = val.dcfVal;
+    out.dcfAfter  = factor > 0 ? val.dcfVal * factor : 0;
+  } else if (val && val.dcfVal > 0 && !/Reported FCF/.test(val.fcfSource || '')) {
+    out.dcfNote = 'The DCF method used EPS as its cash-flow proxy here, and GAAP EPS already deducts SBC — no adjustment needed.';
+  }
+  return out;
+}
+
+function saBurryHtml(a) {
+  if (a.na) {
+    return `<div class="criteria-item"><span>–</span><span><strong>n/a</strong> — ${escapeHtml(a.na)}</span></div>`;
+  }
+  const rows = [];
+  rows.push(`<div class="criteria-item ${a.cls}"><span>${a.cls==='pass'?'✓':a.cls==='fail'?'✗':'~'}</span><span>SBC ${a.form ? '(' + escapeHtml(String(a.form)) + ' ' + escapeHtml(String(a.year || '')) + ')' : ''}: <strong>${saFormatBigNumber(a.sbc)}</strong>${a.pct !== null ? ` = <strong>${a.pct.toFixed(1)}%</strong> of FCF <span style="opacity:.7">(${a.basis})</span>` : ''}</span></div>`);
+  if (a.fcfFiling !== null && a.fcfFiling !== undefined) {
+    const fcfTxt = a.fcfFiling < 0 ? '−' + saFormatBigNumber(-a.fcfFiling) : saFormatBigNumber(a.fcfFiling);
+    rows.push(`<div class="criteria-item"><span>·</span><span>FCF in that filing: <strong>${fcfTxt}</strong>${a.capexMissing ? ' <span style="opacity:.7">(capex not tagged — operating cash flow used)</span>' : ''}</span></div>`);
+  }
+  if (a.fcfPSadj !== undefined) {
+    rows.push(`<div class="criteria-item"><span>·</span><span>FCF/share (TTM): <strong>$${a.fcfPS.toFixed(2)}</strong> → after SBC <strong>$${a.fcfPSadj.toFixed(2)}</strong></span></div>`);
+  }
+  if (a.dcfBefore !== undefined) {
+    const chg = (a.dcfAfter / a.dcfBefore - 1) * 100;
+    rows.push(`<div class="criteria-item ${a.cls}"><span>→</span><span>DCF value (method #5): <strong>$${a.dcfBefore.toFixed(2)}</strong> → after SBC <strong>$${a.dcfAfter.toFixed(2)}</strong> <span style="opacity:.75">(${chg.toFixed(1)}%)</span></span></div>`);
+  } else if (a.dcfNote) {
+    rows.push(`<div class="criteria-item"><span>·</span><span>${a.dcfNote}</span></div>`);
+  }
+  rows.push(`<div style="font-size:.78rem;color:#475569;line-height:1.5;margin-top:4px">${a.summary}</div>`);
+  return rows.join('');
+}
+
+async function saLoadBurryCheck(data) {
+  const body = document.getElementById('saBurryBody');
+  if (!body) return;
+  const sym = data.symbol;
+  const setVerdict = (text, color) => {
+    const v = document.getElementById('saBurryVerdict');
+    if (v) { v.textContent = text; v.style.color = color; }
+  };
+  if (!saGetApiKey()) { body.innerHTML = saBurryHtml({ na: 'Finnhub API key not set' }); setVerdict('n/a', '#64748b'); return; }
+  const r = await saFetchSbc(sym);
+  if (saCurrentData && saCurrentData.symbol !== sym) return;   // user already loaded another ticker
+  const a = saBurryAssess(data, saCalculateValuation(data), r);
+  const target = document.getElementById('saBurryBody');
+  if (!target) return;
+  target.innerHTML = saBurryHtml(a);
+  const colors = { pass: '#10b981', hold: '#f59e0b', fail: '#ef4444' };
+  setVerdict(a.na ? 'n/a' : a.verdict, a.na ? '#64748b' : (colors[a.cls] || '#64748b'));
+}
+
 function saRenderAnalysis(data) {
   try {
   // Safe accessors — all via safeNum to prevent crash on partial Finnhub data
@@ -3627,6 +3841,7 @@ function saRenderAnalysis(data) {
 
   const bPass = buffett.filter(c => c.pass).length;
   const gPass = graham.filter(c => c.pass).length;
+  const debt  = saDebtSafety(data);
 
   document.getElementById('saAnalysis').innerHTML = `
     <h2 class="section-title">🎯 Analysis</h2>
@@ -3654,7 +3869,36 @@ function saRenderAnalysis(data) {
           <span>${g.good?'✓':g.ok?'~':'✗'}</span>
           <span>${g.label}: <strong>${g.value}</strong></span>
         </div>`).join('')}
+    </div>
+
+    <div class="criteria-section">
+      <h3 class="section-title" style="display:flex;align-items:center;justify-content:space-between">
+        <span>🛡️ Debt Safety</span>
+        <span style="font-size:.78rem;font-weight:600;color:${debt.color}">${debt.verdict}</span>
+      </h3>
+      ${debt.rows.map(r => {
+        const cls = r.score === null ? '' : r.score >= 2 ? 'pass' : r.score === 1 ? 'hold' : 'fail';
+        const icon = r.score === null ? '–' : r.score >= 2 ? '✓' : r.score === 1 ? '~' : '✗';
+        return `<div class="criteria-item ${cls}"><span>${icon}</span><span>${r.name}: <strong>${r.value}</strong>${r.note ? ` <span style="opacity:.7;font-size:.9em">— ${r.note}</span>` : ''}</span></div>`;
+      }).join('')}
+      <div style="font-size:.78rem;color:#475569;line-height:1.5;margin-top:4px">${debt.summary}</div>
+    </div>
+
+    <div class="criteria-section">
+      <h3 class="section-title" style="display:flex;align-items:center;justify-content:space-between">
+        <span>🔥 Burry SBC Check</span>
+        <span id="saBurryVerdict" style="font-size:.78rem;font-weight:600;color:#64748b">loading…</span>
+      </h3>
+      <div id="saBurryBody"><div class="criteria-item"><span>⏳</span><span>Reading stock-based compensation from the latest 10-K…</span></div></div>
     </div>`;
+
+  saLoadBurryCheck(data).catch(e => {
+    console.error('[saLoadBurryCheck]', e);
+    const b = document.getElementById('saBurryBody');
+    if (b) b.innerHTML = saBurryHtml({ na: 'Unexpected error reading the filing' });
+    const v = document.getElementById('saBurryVerdict');
+    if (v) { v.textContent = 'n/a'; v.style.color = '#64748b'; }
+  });
 
   }
   catch(e) {
@@ -4009,7 +4253,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Service Worker registration ───────────────────────────────
 // Bump APP_VERSION AND CACHE_NAME in sw.js together on every deploy.
 // The version check below clears old caches immediately on load.
-const APP_VERSION = '2.1.2';
+const APP_VERSION = '2.3';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
