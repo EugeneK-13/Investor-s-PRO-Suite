@@ -2563,7 +2563,7 @@ const SA_METHOD_TOOLTIPS = {
   evEbitda:  { title:'EV/EBITDA',         formula:'Price × (Growth-Adj. Sector Target/Current)', desc:'3-tier fallback: Finnhub ratio → computed from EV & reported EBITDA → approximated from operating margin if no EBITDA figure exists at all. Sector target multiple is scaled by revenue growth (0.85×–1.35×) so a mature and a hyper-growth name in the same sector aren\'t valued at the same multiple.' },
   ps:        { title:'Price/Sales',       formula:'Revenue × Target P/S',       desc:'Revenue-based valuation' },
   mos:       { title:'Conservative Fair Value & Margin of Safety', formula:'Lowest of the surviving methods', desc:'Instead of the weighted-average Fair Value above, this takes the single most pessimistic method that still passed the sanity filters — the "if I\'m wrong, how wrong could I be" number. Margin of Safety = (Conservative Fair Value − Current Price) / Current Price. A value investor buys with room for the weighted estimate to be too optimistic; this is that room, expressed as a percentage.' },
-  scenarios: { title:'Bear / Base / Bull Scenarios', formula:'DCF_ADVANCED or EPS_PE, auto-selected', desc:'Runs three growth paths (Bear/Base/Bull) instead of one point estimate. Model is auto-selected: DCF_ADVANCED (same 5yr FCF engine as the DCF method, same CAPM WACC) when free cash flow is large enough relative to price to be representative; EPS_PE (EPS compounded forward at each scenario\'s growth rate × a scenario-adjusted exit P/E) when FCF is too thin — a capex cycle or pre-inflection name where a pure DCF would mechanically understate value. When EPS_PE uses forward EPS instead of TTM/normalized (because forward is meaningfully higher — the capex-cycle signature), growth rates are halved to avoid compounding the same earnings recovery twice. PW Target blends the three by probability weight (default 25/50/25, tilted toward Bear when the 8 valuation methods already disagree sharply). 5Y CAGR is the annualized return to reach that scenario\'s target in 5 years.' }
+  scenarios: { title:'Bear / Base / Bull Scenarios', formula:'DCF_ADVANCED or EPS_PE, auto-selected', desc:'Runs three growth paths (Bear/Base/Bull) instead of one point estimate. Model is auto-selected: DCF_ADVANCED (same 5yr FCF engine as the DCF method, same CAPM WACC) when free cash flow is large enough relative to price to be representative; EPS_PE (EPS compounded forward at each scenario\'s growth rate × a scenario-adjusted exit P/E) when FCF is too thin — a capex cycle or pre-inflection name where a pure DCF would mechanically understate value. When EPS_PE uses forward EPS instead of TTM/normalized (the capex-cycle signature), it anchors the exit multiple to the stock\'s own current forward P/E rather than the generic sector target — so Base means "today\'s multiple holds, earnings grow as estimated" — and treats the forward figure as year 1, compounding only 4 more years so that year isn\'t re-grown twice. A ⚠️ appears when Base still lands far from the weighted Fair Value above, since the two methodologies can genuinely diverge and a large gap deserves a second look. PW Target blends the three by probability weight (default 25/50/25, tilted toward Bear when the 8 valuation methods already disagree sharply). 5Y CAGR is the annualized return to reach that scenario\'s target in 5 years.' }
 };
 
 function saShowMethodTooltip(method) {
@@ -2903,6 +2903,18 @@ function saRenderValuation(data) {
         const modelBadge = scenarios.model === 'DCF_ADVANCED'
           ? `<span style="opacity:.65;font-weight:500">(FCF-based DCF)</span>`
           : `<span style="opacity:.65;font-weight:500">(EPS × P/E — FCF too thin for a DCF here${scenarios.usedForwardEps ? ', using forward EPS' : ''})</span>`;
+        // Divergence flag: Base and the weighted Fair Value come from
+        // genuinely different methodologies (this is a single forward-
+        // looking projection; Fair Value blends up to 8 backward- and
+        // forward-looking methods together) and can legitimately disagree
+        // — but a large gap is worth surfacing rather than leaving silent,
+        // especially since a name here typically has few surviving methods
+        // (that's exactly why EPS_PE kicked in over DCF in the first place).
+        const fv = safeNum(val.fairValue);
+        const divergenceRatio = fv > 0 ? scenarios.base.target / fv : null;
+        const divergenceHtml = (divergenceRatio !== null && (divergenceRatio > 1.8 || divergenceRatio < 0.55))
+          ? `<div style="margin-top:8px;padding:8px 12px;background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.35);border-radius:8px;color:#92400e;font-size:.72rem;line-height:1.4">⚠️ Base target is ${divergenceRatio.toFixed(1)}× the weighted Fair Value above — the two use different methodologies (this is a single forward projection; Fair Value blends ${val.validVals.length} of 8 methods) and can genuinely diverge, but a gap this large is worth double-checking against the actual forward estimates before treating it as a target.</div>`
+          : '';
         return `<div style="margin-top:14px;padding:12px 14px;background:#eef2f7;border:1px solid rgba(15,23,42,.12);border-radius:10px" onmouseenter="saShowMethodTooltip('scenarios')" onmousemove="saMoveTooltip(event)" onmouseleave="saHideMethodTooltip()">
           <div style="font-weight:700;font-size:.85em;margin-bottom:6px;color:#334155">🎯 Bear / Base / Bull — 5Y Price Targets ℹ️ ${modelBadge}</div>
           <div style="display:grid;grid-template-columns:1.3fr .9fr .9fr .7fr;gap:8px;font-size:.68rem;color:#64748b;text-transform:uppercase;letter-spacing:.4px;padding-bottom:4px;border-bottom:1px solid rgba(148,163,184,.3)">
@@ -2915,7 +2927,8 @@ function saRenderValuation(data) {
             <span style="font-size:.85em;font-weight:700;color:#1d4ed8">PW Blended Target</span>
             <span style="font-family:'DM Mono',monospace;font-weight:700;color:#0f172a">$${scenarios.pwTarget.toFixed(2)} <span style="font-size:.8em;font-weight:600;color:${scenarios.pwUpside>0?'#10b981':'#ef4444'}">(${scenarios.pwUpside>0?'+':''}${scenarios.pwUpside.toFixed(1)}%, ${scenarios.pwCagr>0?'+':''}${scenarios.pwCagr.toFixed(1)}% CAGR)</span></span>
           </div>
-          <div style="margin-top:6px;font-size:.7rem;color:#64748b;line-height:1.4">${scenarios.model === 'DCF_ADVANCED' ? 'DCF-only' : 'EPS × exit-multiple-only'} projection (not the same blend as Fair Value above) — for setting concrete price targets, not as a replacement for the weighted Fair Value.${scenarios.usedForwardEps ? ' Growth rates are halved vs. the reported figure since the forward-EPS base already prices in a recovery — compounding the full rate on top would double-count it.' : ''}</div>
+          <div style="margin-top:6px;font-size:.7rem;color:#64748b;line-height:1.4">${scenarios.model === 'DCF_ADVANCED' ? 'DCF-only' : 'EPS × exit-multiple-only'} projection (not the same blend as Fair Value above) — for setting concrete price targets, not as a replacement for the weighted Fair Value.${scenarios.usedForwardEps ? ' Uses the forward EPS estimate as year 1 and compounds 4 more years to reach the 5-year horizon — not 5 full years on top of it, which would double-count the year the forward estimate already covers.' : ''}</div>
+          ${divergenceHtml}
         </div>`;
       })()
     : '';
@@ -3337,15 +3350,23 @@ function saRunDcfScenario(fcfPerShare, wacc, terminalGrowth, g1) {
 
 // EPS × P/E-trajectory scenario engine — the fallback for names where FCF
 // is temporarily depressed (capex cycle) and a pure DCF would badly
-// understate value. Projects EPS forward 5 years at the scenario's growth
-// rate, then applies a target P/E (compressing/holding/expanding it by
-// scenario) to that year-5 EPS — the same "future EPS × future multiple"
-// shape as the sector P/E method above, just run forward instead of on
-// today's numbers.
-function saRunEpsPeScenario(eps, peMultiple, g, peShift) {
-  const epsYear5 = eps * Math.pow(1 + g, 5);
+// understate value. Projects EPS forward from `eps` at the scenario's
+// growth rate for `years` periods, then applies a target P/E (compressing/
+// holding/expanding it by scenario) to that final-year EPS — the same
+// "future EPS × future multiple" shape as the sector P/E method above,
+// just run forward instead of on today's numbers.
+//
+// `years` matters: when `eps` here is TTM/normalized (today's actual
+// earnings), a full 5 years of growth to reach "year 5" is correct. But
+// when `eps` is already the market's forward (~year-1) estimate, that
+// estimate already IS year 1 of the growth path — compounding a full 5
+// more years on top double-counts year 1. Callers pass years=4 in that
+// case so the projection lands on the same year-5 horizon without
+// re-growing the year already baked into the forward estimate.
+function saRunEpsPeScenario(eps, peMultiple, g, peShift, years) {
+  const epsYearN = eps * Math.pow(1 + g, years);
   const targetPe = Math.max(peMultiple * peShift, 4); // floor so a bear case can't imply a near-zero multiple
-  const target = epsYear5 * targetPe;
+  const target = epsYearN * targetPe;
   return isFinite(target) && target > 0 ? target : 0;
 }
 
@@ -3355,7 +3376,15 @@ function saCalculateScenarios(data, val) {
 
   const epsGrowth = safeNum(data.epsGrowth);
   const revGrowth = safeNum(data.revenueGrowth);
-  const baseG = Math.min(Math.max(Math.abs(epsGrowth || revGrowth) / 100, 0), 0.30);
+  // Growth signal for Base: prefer EPS growth when it's a genuine positive
+  // number; GAAP EPS growth is frequently negative or a meaningless
+  // artifact right after a loss-to-profit swing or heavy amortization
+  // (MRVL-style names), even though the underlying business is growing
+  // fine — same fallback the PEG method already uses. Using Math.abs()
+  // here would be wrong: it would flip a real earnings DECLINE into a
+  // fake positive growth rate instead of falling back to a better signal.
+  const growthSignal = epsGrowth > 0.5 ? epsGrowth : (revGrowth > 0.5 ? revGrowth : epsGrowth);
+  const baseG = Math.min(Math.max(growthSignal / 100, -0.15), 0.30);
 
   // Bear: compress growth toward zero (never below -5%) — a slowdown, not
   // a collapse. Bull: extend growth, capped so a single hypergrowth year
@@ -3385,6 +3414,17 @@ function saCalculateScenarios(data, val) {
   const usedForwardEps = val.forwardEps > 0 && val.forwardEps > val.eps * 1.15;
   const epsBase = usedForwardEps ? val.forwardEps : val.eps;
   const epsUsable = epsBase > 0;
+  // Anchor multiple: when using forward EPS, anchor Base to the multiple the
+  // market is ALREADY paying on that same forward estimate (price / forward
+  // EPS — i.e. data.forwardPE), not the generic sector-target multiple.
+  // Sector peMultiple is calibrated for the plain P/E method (trailing EPS
+  // vs a sector norm); applying it on top of an already-forward EPS mixes
+  // two different reference points and inflates Base even with 0% growth
+  // whenever the sector target happens to sit above the stock's actual
+  // current forward P/E. Anchoring to the real forward P/E makes Base mean
+  // what it should: "today's multiple holds, earnings grow as estimated."
+  const forwardPeRatio = safeNum(data.forwardPE);
+  const anchorPe = (usedForwardEps && forwardPeRatio > 0) ? forwardPeRatio : val.peMultiple;
 
   let model, bearTarget, baseTarget, bullTarget;
   let bearGUsed = bearG, baseGUsed = baseG, bullGUsed = bullG;
@@ -3397,18 +3437,17 @@ function saCalculateScenarios(data, val) {
     model = 'EPS_PE';
     // Bear also compresses the exit multiple (de-rating on top of slower
     // growth); Bull holds/expands it modestly. Base holds today's multiple.
-    // Damping: when the base already jumped from depressed TTM EPS to
-    // forward EPS, that jump IS the recovery — the market's forward
-    // estimate already prices in the capex cycle resolving. Compounding
-    // the full reported growth rate on top of an already-recovered base
-    // double-counts the same recovery twice. Halving the growth path in
-    // this case keeps the scenario spread representing "growth after the
-    // recovery" rather than "recovery, then the same recovery again".
-    const dampen = usedForwardEps ? 0.5 : 1.0;
-    bearGUsed = bearG * dampen; baseGUsed = baseG * dampen; bullGUsed = bullG * dampen;
-    bearTarget = saRunEpsPeScenario(epsBase, val.peMultiple, bearGUsed, 0.75);
-    baseTarget = saRunEpsPeScenario(epsBase, val.peMultiple, baseGUsed, 1.00);
-    bullTarget = saRunEpsPeScenario(epsBase, val.peMultiple, bullGUsed, 1.15);
+    // Horizon: when epsBase is TTM/normalized (today's actual earnings),
+    // it's "year 0" and needs 5 full years of growth to reach the year-5
+    // horizon. When epsBase is forward EPS, that figure already IS year 1
+    // of the growth path (the market's own ~12-month-ahead estimate) — so
+    // only 4 more years of compounding are needed to reach the same
+    // year-5 horizon. Using 5 years on top of an already-forward number
+    // would re-grow the year the estimate already covers.
+    const years = usedForwardEps ? 4 : 5;
+    bearTarget = saRunEpsPeScenario(epsBase, anchorPe, bearGUsed, 0.75, years);
+    baseTarget = saRunEpsPeScenario(epsBase, anchorPe, baseGUsed, 1.00, years);
+    bullTarget = saRunEpsPeScenario(epsBase, anchorPe, bullGUsed, 1.15, years);
   } else {
     return null; // neither FCF nor EPS usable — no representative base to project
   }
@@ -3970,7 +4009,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Service Worker registration ───────────────────────────────
 // Bump APP_VERSION AND CACHE_NAME in sw.js together on every deploy.
 // The version check below clears old caches immediately on load.
-const APP_VERSION = '2.1.1';
+const APP_VERSION = '2.1.2';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
