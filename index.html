@@ -2562,7 +2562,8 @@ const SA_METHOD_TOOLTIPS = {
   ddm:       { title:'Dividend Discount', formula:'D×(1+g)/(r-g)',              desc:"Gordon Model for dividend stocks. Needs an actual dividend." },
   evEbitda:  { title:'EV/EBITDA',         formula:'Price × (Growth-Adj. Sector Target/Current)', desc:'3-tier fallback: Finnhub ratio → computed from EV & reported EBITDA → approximated from operating margin if no EBITDA figure exists at all. Sector target multiple is scaled by revenue growth (0.85×–1.35×) so a mature and a hyper-growth name in the same sector aren\'t valued at the same multiple.' },
   ps:        { title:'Price/Sales',       formula:'Revenue × Target P/S',       desc:'Revenue-based valuation' },
-  mos:       { title:'Conservative Fair Value & Margin of Safety', formula:'Lowest of the surviving methods', desc:'Instead of the weighted-average Fair Value above, this takes the single most pessimistic method that still passed the sanity filters — the "if I\'m wrong, how wrong could I be" number. Margin of Safety = (Conservative Fair Value − Current Price) / Current Price. A value investor buys with room for the weighted estimate to be too optimistic; this is that room, expressed as a percentage.' }
+  mos:       { title:'Conservative Fair Value & Margin of Safety', formula:'Lowest of the surviving methods', desc:'Instead of the weighted-average Fair Value above, this takes the single most pessimistic method that still passed the sanity filters — the "if I\'m wrong, how wrong could I be" number. Margin of Safety = (Conservative Fair Value − Current Price) / Current Price. A value investor buys with room for the weighted estimate to be too optimistic; this is that room, expressed as a percentage.' },
+  scenarios: { title:'Bear / Base / Bull Scenarios', formula:'Same 5yr DCF engine, 3 growth paths', desc:'Runs the DCF method three times with different FCF growth assumptions instead of one point estimate: Bear compresses growth toward a slowdown, Base uses the reported growth rate, Bull extends it (capped). All three taper to the same 3% terminal growth and use the same CAPM WACC — only the growth path changes. PW Target blends the three by probability weight (default 25/50/25, tilted toward Bear when the 8 valuation methods already disagree sharply). 5Y CAGR is the annualized return to reach that scenario\'s target in 5 years.' }
 };
 
 function saShowMethodTooltip(method) {
@@ -2885,6 +2886,36 @@ function saRenderValuation(data) {
       })()
     : '';
 
+  // Bear / Base / Bull scenario model — 5-year price targets and implied
+  // CAGR per scenario, for setting concrete goals rather than reading a
+  // single point estimate as if it were the only possible outcome.
+  const scenarios = saCalculateScenarios(data, val);
+  const scenariosHtml = scenarios
+    ? (() => {
+        const row = (label, emoji, s, color) => `
+          <div style="display:grid;grid-template-columns:1.3fr .9fr .9fr .7fr;gap:8px;align-items:baseline;padding:8px 0;border-bottom:1px solid rgba(148,163,184,.15)">
+            <span style="font-size:.82em;font-weight:700;color:${color}">${emoji} ${label} <span style="opacity:.65;font-weight:500">(${(s.weight*100).toFixed(0)}%)</span></span>
+            <span style="font-family:'DM Mono',monospace;font-weight:700;color:#0f172a;text-align:right">$${s.target.toFixed(2)}</span>
+            <span style="font-size:.82em;color:${color};text-align:right;font-weight:600">${s.growth>0?'+':''}${s.growth.toFixed(1)}% g</span>
+            <span style="font-size:.82em;color:${color};text-align:right;font-weight:600">${s.cagr>0?'+':''}${s.cagr.toFixed(1)}%</span>
+          </div>`;
+        return `<div style="margin-top:14px;padding:12px 14px;background:#eef2f7;border:1px solid rgba(15,23,42,.12);border-radius:10px" onmouseenter="saShowMethodTooltip('scenarios')" onmousemove="saMoveTooltip(event)" onmouseleave="saHideMethodTooltip()">
+          <div style="font-weight:700;font-size:.85em;margin-bottom:6px;color:#334155">🎯 Bear / Base / Bull — 5Y Price Targets ℹ️</div>
+          <div style="display:grid;grid-template-columns:1.3fr .9fr .9fr .7fr;gap:8px;font-size:.68rem;color:#64748b;text-transform:uppercase;letter-spacing:.4px;padding-bottom:4px;border-bottom:1px solid rgba(148,163,184,.3)">
+            <span>Scenario</span><span style="text-align:right">Target</span><span style="text-align:right">FCF Growth</span><span style="text-align:right">5Y CAGR</span>
+          </div>
+          ${row('Bear', '🔴', scenarios.bear, '#ef4444')}
+          ${row('Base', '🟡', scenarios.base, '#d97706')}
+          ${row('Bull', '🟢', scenarios.bull, '#10b981')}
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:8px;padding-top:8px;border-top:2px solid #3b82f6">
+            <span style="font-size:.85em;font-weight:700;color:#1d4ed8">PW Blended Target</span>
+            <span style="font-family:'DM Mono',monospace;font-weight:700;color:#0f172a">$${scenarios.pwTarget.toFixed(2)} <span style="font-size:.8em;font-weight:600;color:${scenarios.pwUpside>0?'#10b981':'#ef4444'}">(${scenarios.pwUpside>0?'+':''}${scenarios.pwUpside.toFixed(1)}%, ${scenarios.pwCagr>0?'+':''}${scenarios.pwCagr.toFixed(1)}% CAGR)</span></span>
+          </div>
+          <div style="margin-top:6px;font-size:.7rem;color:#64748b;line-height:1.4">DCF-only projection (not the same blend as Fair Value above) — for setting concrete price targets, not as a replacement for the weighted Fair Value.</div>
+        </div>`;
+      })()
+    : '';
+
   document.getElementById('saValuation').innerHTML = `
     <div class="${cardClass}">
       <div>Fair Value ${profileBadge}</div>
@@ -2893,6 +2924,7 @@ function saRenderValuation(data) {
       <div>${rec}</div>
     </div>
     ${mosHtml}
+    ${scenariosHtml}
     <div class="valuation-methods">
       <div class="method-title">💎 All Methods (${val.validVals.length} of 8 used)</div>
       <div class="method-row" onmouseenter=\"saShowMethodTooltip('graham')\" onmousemove=\"saMoveTooltip(event)\" onmouseleave="saHideMethodTooltip()"><span>1. Graham Number ℹ️</span>${saMethodCell(val,'graham','graham')}</div>
@@ -3267,7 +3299,74 @@ function saCalculateValuation(data) {
            fairValue, potential, peMultiple, validVals,
            profile, reasons, epsSource, fcfSource, evEbitdaSource,
            evToEbitdaEff, evEbitdaTarget, pegRatioEff, pegGrowthSource,
-           wacc, impliedGrowth, dispersion };
+           wacc, impliedGrowth, dispersion, fcfPerShare, price };
+}
+
+// ── Bear / Base / Bull scenario model ───────────────────────────────
+// Runs the SAME 5yr two-stage DCF engine as the main DCF method above,
+// three times, with different stage-1 growth assumptions instead of one
+// point estimate. Gives a probability-weighted (PW) blended target and
+// implied 5Y CAGR per scenario — useful for setting concrete price targets
+// rather than reading a single "fair value" number as if it were certain.
+//
+// Growth for each scenario, in order of preference:
+//   1. Reported forward-looking growth (epsGrowth/revGrowth) as the Base case
+//   2. Bear = Base compressed toward 0 (and floored at -5%) — a demand shock
+//      or margin compression case, not a full DCF-implied worst case.
+//   3. Bull = Base extended, capped at 50% stage-1 growth — an execution/
+//      re-rating upside case, not a "everything goes right forever" fantasy.
+// All three still taper to the same 3% terminal growth over 5 years and
+// discount at the same CAPM WACC, so the spread reflects growth assumptions
+// only, not a change in discount rate or terminal assumptions.
+function saRunDcfScenario(fcfPerShare, wacc, terminalGrowth, g1) {
+  let pv = 0, fcfProj = fcfPerShare;
+  for (let yr = 1; yr <= 5; yr++) {
+    const gYear = g1 - ((g1 - terminalGrowth) * (yr - 1) / 4);
+    fcfProj = fcfProj * (1 + gYear);
+    pv += fcfProj / Math.pow(1 + wacc, yr);
+  }
+  const terminalValue = (fcfProj * (1 + terminalGrowth)) / (wacc - terminalGrowth);
+  pv += terminalValue / Math.pow(1 + wacc, 5);
+  return isFinite(pv) && pv > 0 ? pv : 0;
+}
+
+function saCalculateScenarios(data, val) {
+  const price = safeNum(data.price);
+  const fcfPerShare = val.fcfPerShare;
+  const wacc = val.wacc;
+  if (!(price > 0) || !(fcfPerShare > 0) || !(wacc > SA_TERMINAL_G)) return null;
+
+  const epsGrowth = safeNum(data.epsGrowth);
+  const revGrowth = safeNum(data.revenueGrowth);
+  const baseG = Math.min(Math.max(Math.abs(epsGrowth || revGrowth) / 100, 0), 0.30);
+
+  // Bear: compress growth toward zero (never below -5%) — a slowdown, not
+  // a collapse. Bull: extend growth, capped so a single hypergrowth year
+  // doesn't get naively extrapolated for 5 years straight.
+  const bearG = Math.max(baseG * 0.35 - 0.02, -0.05);
+  const bullG = Math.min(baseG * 1.6 + 0.03, 0.50);
+
+  const bearTarget = saRunDcfScenario(fcfPerShare, wacc, SA_TERMINAL_G, bearG);
+  const baseTarget = saRunDcfScenario(fcfPerShare, wacc, SA_TERMINAL_G, baseG);
+  const bullTarget = saRunDcfScenario(fcfPerShare, wacc, SA_TERMINAL_G, bullG);
+  if (!(bearTarget > 0) || !(baseTarget > 0) || !(bullTarget > 0)) return null;
+
+  // Probability weights — standard 25/50/25, but tilted toward Bear when
+  // the stock's own valuation methods already disagree sharply (dispersion),
+  // since a high-dispersion setup means more can plausibly go wrong.
+  let wBear = 0.25, wBase = 0.50, wBull = 0.25;
+  if (val.dispersion && val.dispersion.high) { wBear = 0.35; wBase = 0.45; wBull = 0.20; }
+
+  const pwTarget = bearTarget * wBear + baseTarget * wBase + bullTarget * wBull;
+  const cagr = (target) => (Math.pow(target / price, 1 / 5) - 1) * 100;
+
+  return {
+    bear: { target: bearTarget, growth: bearG * 100, weight: wBear, cagr: cagr(bearTarget) },
+    base: { target: baseTarget, growth: baseG * 100, weight: wBase, cagr: cagr(baseTarget) },
+    bull: { target: bullTarget, growth: bullG * 100, weight: wBull, cagr: cagr(bullTarget) },
+    pwTarget, pwCagr: cagr(pwTarget),
+    pwUpside: ((pwTarget - price) / price) * 100
+  };
 }
 
 function saRenderFinancials(data) {
@@ -3807,7 +3906,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Service Worker registration ───────────────────────────────
 // Bump APP_VERSION AND CACHE_NAME in sw.js together on every deploy.
 // The version check below clears old caches immediately on load.
-const APP_VERSION = '2.0.1';
+const APP_VERSION = '2.1';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
