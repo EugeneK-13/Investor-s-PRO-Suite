@@ -610,6 +610,48 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
 #page-dcf .dcf-sensitivity td.pos-bg{background:rgba(16,185,129,.07);color:var(--dcf-green)}
 #page-dcf .dcf-sensitivity td.neg-bg{background:rgba(239,68,68,.07);color:var(--dcf-red)}
 
+/* ===== TRADINGVIEW WIDGETS (Stock Analyzer Chart tab + Markets page) ===== */
+.tc-markets .tc-icon{background:rgba(16,185,129,0.12)}.tc-markets:hover{border-color:rgba(16,185,129,0.35)}
+.tv-box{background:#0d1526;border:1px solid #1a2744;border-radius:14px;overflow:hidden;padding:6px}
+.tv-h-chart{height:600px}.tv-h-ta{height:470px}.tv-h-heat{height:620px}.tv-h-mini{height:190px}
+.tv-attrib{font-size:.66rem;text-align:right;padding:2px 6px 0;line-height:20px}
+.tv-attrib a{color:#475569;text-decoration:none}.tv-attrib a:hover{color:#60a5fa}
+.tv-offline,.tv-empty{display:flex;align-items:center;justify-content:center;height:100%;min-height:120px;color:#64748b;font-size:.85rem;text-align:center;padding:20px}
+.tv-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.tv-toolbar-label{font-size:.72rem;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:#64748b}
+.tv-toolbar-hint{font-size:.72rem;color:#475569;margin-left:auto}
+.tv-chip{padding:6px 12px;border-radius:8px;border:1px solid #1a2744;background:rgba(255,255,255,.03);color:#94a3b8;font-size:.78rem;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .18s}
+.tv-chip:hover{border-color:rgba(59,130,246,.4);color:#e2e8f0}
+.tv-chip.active{background:rgba(59,130,246,.15);border-color:rgba(59,130,246,.5);color:#60a5fa}
+.tv-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+#page-stock #saChart{background:#0a0e1a;color:#e2e8f0}
+#page-markets{background:#0a0e1a;min-height:100vh}
+#page-markets .mk-tape{border-bottom:1px solid #1a2744;min-height:46px}
+#page-markets .mk-inner{padding:28px 40px 60px;max-width:1400px;margin:0 auto}
+#page-markets .mk-hero h1{font-family:'Syne',sans-serif;font-size:clamp(1.6rem,2.4vw,2.2rem);font-weight:800;color:#fff;margin-bottom:6px}
+#page-markets .mk-hero p{color:#64748b;font-size:.88rem;margin-bottom:26px}
+#page-markets .mk-section{margin-bottom:34px}
+#page-markets .mk-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+#page-markets .mk-head h2{font-family:'Syne',sans-serif;font-size:1.05rem;font-weight:700;color:#e2e8f0;margin-right:auto}
+#page-markets .mk-sub{font-size:.75rem;color:#64748b}
+#page-markets .mk-seg{display:flex;gap:4px;background:rgba(255,255,255,.03);border:1px solid #1a2744;border-radius:10px;padding:3px}
+#page-markets .mk-seg .tv-chip{border:none;padding:5px 11px}
+#page-markets .mk-mini-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+#page-markets .mk-card{display:flex;flex-direction:column}
+#page-markets .mk-card .tv-box{flex:1}
+#page-markets .mk-card-actions{display:flex;justify-content:flex-end;margin-top:6px}
+#page-markets .mk-note{font-size:.74rem;color:#475569;margin-top:8px;line-height:1.5}
+@media(max-width:768px){
+  .tv-h-chart{height:440px}.tv-h-ta{height:430px}.tv-h-heat{height:480px}
+  .tv-grid-2{grid-template-columns:1fr}
+  .tv-toolbar-hint{margin-left:0;width:100%}
+  #page-stock #saChart{padding:14px 12px}
+  #page-markets .mk-inner{padding:18px 16px 50px}
+  #page-markets .mk-mini-grid{grid-template-columns:1fr 1fr;gap:8px}
+  #page-markets .tv-h-mini{height:160px}
+}
+@media(max-width:420px){ #page-markets .mk-mini-grid{grid-template-columns:1fr} }
+
 /* ===== SHARED MOBILE ===== */
 
 /* ── Mobile hamburger button (hidden on desktop) ── */
@@ -960,6 +1002,9 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
     <button class="nav-item nav-active" id="nav-dashboard" onclick="showPage('dashboard')">
       <span class="nav-icon">🏠</span><span class="nav-label">Dashboard</span>
     </button>
+    <button class="nav-item" id="nav-markets" onclick="showPage('markets')">
+      <span class="nav-icon">🌐</span><span class="nav-label">Markets</span>
+    </button>
     <div class="nav-section-label">Tools</div>
     <button class="nav-item" id="nav-stock" onclick="showPage('stock')">
       <span class="nav-icon">📈</span><span class="nav-label">Stock Analyzer</span>
@@ -1025,6 +1070,12 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
       <div class="tc-desc">Live Finnhub data. 7-method valuation, options strategies, watchlist, alerts, PDF export.</div>
       <div class="tc-tags"><span class="tc-tag">Finnhub API</span><span class="tc-tag">DCF</span><span class="tc-tag">Options</span></div>
     </button>
+    <button class="tool-card tc-markets" onclick="showPage('markets')">
+      <div class="tc-icon">🌐</div>
+      <div class="tc-name">Markets &amp; Charts</div>
+      <div class="tc-desc">Live TradingView charts: market pulse, stock &amp; crypto heatmaps, and mini-charts for your watchlist.</div>
+      <div class="tc-tags"><span class="tc-tag">Heatmaps</span><span class="tc-tag">Mini-charts</span><span class="tc-tag">TradingView</span></div>
+    </button>
     <button class="tool-card tc-position" onclick="showPage('position')">
       <div class="tc-icon">📂</div>
       <div class="tc-name">Position Manager</div>
@@ -1055,6 +1106,45 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
       <div class="tc-desc">Conservative and Enhanced DCF models. Includes network effects and platform multipliers.</div>
       <div class="tc-tags"><span class="tc-tag">Pure DCF</span><span class="tc-tag">Enhanced</span><span class="tc-tag">EV</span></div>
     </button>
+  </div>
+</div>
+
+<!-- ████████████████ MARKETS (TradingView widgets) ████████████████ -->
+<div id="page-markets" class="app-page">
+  <div class="page-topbar">
+    <button class="mobile-menu-btn" onclick="toggleMobileSidebar()" aria-label="Menu">☰</button>
+    <button class="back-btn" onclick="showPage('dashboard')">← Dashboard</button>
+    <span class="page-topbar-title">🌐 Markets</span>
+  </div>
+  <div class="mk-tape" id="mkTape"></div>
+  <div class="mk-inner">
+    <div class="mk-hero">
+      <h1>Markets &amp; Charts</h1>
+      <p>Live charts, heatmaps and your watchlist — interactive widgets powered by TradingView (internet connection required).</p>
+    </div>
+    <section class="mk-section">
+      <div class="mk-head">
+        <h2>📈 Market pulse</h2>
+        <div class="mk-seg" id="mkRangeSeg"></div>
+      </div>
+      <div class="mk-mini-grid" id="mkIndexMinis"></div>
+    </section>
+    <section class="mk-section">
+      <div class="mk-head">
+        <h2>🔥 Heatmap</h2>
+        <div class="mk-seg" id="mkHeatSourceSeg"></div>
+        <div class="mk-seg" id="mkHeatMetricSeg"></div>
+      </div>
+      <div class="tv-box tv-h-heat" id="mkHeatmap"></div>
+      <div class="mk-note" id="mkHeatNote"></div>
+    </section>
+    <section class="mk-section">
+      <div class="mk-head">
+        <h2>⭐ Watchlist</h2>
+        <span class="mk-sub" id="mkWatchCount"></span>
+      </div>
+      <div class="mk-mini-grid" id="mkWatchMinis"></div>
+    </section>
   </div>
 </div>
 
@@ -1166,11 +1256,13 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
       <button class="s-tab" onclick="saSwitchTab('saValuation',this)">💎 Valuation</button>
       <button class="s-tab" onclick="saSwitchTab('saFinancials',this)">📊 Financials</button>
       <button class="s-tab" onclick="saSwitchTab('saAnalysis',this)">🎯 Analysis</button>
+      <button class="s-tab" onclick="saSwitchTab('saChart',this)">📉 Chart</button>
     </div>
     <div class="s-tab-content active" id="saOverview"></div>
     <div class="s-tab-content" id="saValuation"></div>
     <div class="s-tab-content" id="saFinancials"></div>
     <div class="s-tab-content" id="saAnalysis"></div>
+    <div class="s-tab-content" id="saChart"></div>
 
     <!-- Modals -->
     <div class="s-modal" id="saWatchlistModal">
@@ -2209,6 +2301,8 @@ function showPage(id) {
   closeMobileSidebar();
   try { saHideMethodTooltip(); } catch (e) { /* tooltip state not initialised yet */ }
   window.scrollTo({ top: 0, behavior: 'smooth' });
+  // TradingView widgets are built lazily — only when their page is opened.
+  if (id === 'markets') { try { mkRender(); } catch (e) { console.error('[mkRender]', e); } }
 }
 
 // Rotating to landscape / resizing past the mobile breakpoint with the menu
@@ -2760,6 +2854,7 @@ async function saLoadStock() {
       symbol:               ticker,
       name:                 profile.name               || ticker,
       sector:               profile.finnhubIndustry    || 'N/A',
+      exchange:             profile.exchange           || '',
       price:                safeNum(quote.c),
       marketCap:            safeNum(profile.marketCapitalization) * 1e6,
       // Valuation
@@ -2863,6 +2958,9 @@ function saDisplayData(data) {
     el.style.cssText = 'font-size:1.2em;font-weight:700;margin-top:2px;display:block';
   });
   saRenderOverview(data); saRenderValuation(data); saRenderFinancials(data); saRenderAnalysis(data);
+  // New ticker while the Chart tab is open → redraw it; otherwise it redraws when opened.
+  const chartTab = document.getElementById('saChart');
+  if (chartTab && chartTab.classList.contains('active')) saRenderChartTab();
 }
 
 function saGetMetricBadge(type, value) {
@@ -4214,11 +4312,202 @@ function saRenderAnalysis(data) {
   }
 }
 
+// ══ TradingView widgets (free official embeds) ═══════════════════════
+// Iframe widgets served by TradingView — their data does not go through
+// Finnhub and doesn't use the API key. They need an internet connection
+// (not available offline in the PWA). TradingView's terms require keeping
+// the attribution link under each widget.
+const TV_EMBED = 'https://s3.tradingview.com/external-embedding/embed-widget-';
+const tvLS = { get(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } },
+               set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } } };
+
+// Finnhub profile.exchange → TradingView prefix, e.g. "NASDAQ NMS - GLOBAL
+// MARKET" → "NASDAQ:AAPL". Unknown exchange → bare ticker, which TradingView
+// resolves to the primary listing.
+function tvSymbol(symbol, exchange) {
+  const s = String(symbol || '').toUpperCase().trim();
+  if (!/^[A-Z0-9.\-:!_]+$/.test(s)) return '';
+  if (s.includes(':')) return s;
+  const ex = String(exchange || '').toUpperCase();
+  if (/NASDAQ/.test(ex)) return 'NASDAQ:' + s;
+  if (/ARCA|AMERICAN|NYSE MKT|AMEX/.test(ex)) return 'AMEX:' + s;
+  if (/NEW YORK STOCK EXCHANGE|^NYSE/.test(ex)) return 'NYSE:' + s;
+  return s;
+}
+
+// Mount one widget into `host` (replacing what was there). The official
+// embed reads its config from the text of its own <script> tag.
+function tvEmbed(host, widget, config, attribution) {
+  if (!host) return;
+  host.innerHTML = '';
+  if (navigator.onLine === false) {
+    host.innerHTML = '<div class="tv-offline">📡 TradingView charts need an internet connection.</div>';
+    return;
+  }
+  const wrap = document.createElement('div');
+  wrap.className = 'tradingview-widget-container';
+  wrap.style.cssText = config.autosize === false || widget === 'ticker-tape' ? 'width:100%' : 'width:100%;height:100%';
+  const inner = document.createElement('div');
+  inner.className = 'tradingview-widget-container__widget';
+  if (widget !== 'ticker-tape') inner.style.cssText = 'width:100%;height:calc(100% - 20px)';
+  const copy = document.createElement('div');
+  copy.className = 'tradingview-widget-copyright tv-attrib';
+  copy.innerHTML = `<a href="https://www.tradingview.com/" rel="noopener nofollow" target="_blank">${attribution || 'Chart'} by TradingView</a>`;
+  const s = document.createElement('script');
+  s.type = 'text/javascript';
+  s.src = TV_EMBED + widget + '.js';
+  s.async = true;
+  s.text = JSON.stringify(config);
+  wrap.append(inner, copy, s);
+  host.appendChild(wrap);
+}
+
+function tvMiniConfig(symbol, dateRange) {
+  return { symbol, width: '100%', height: '100%', locale: 'en', dateRange, colorTheme: 'dark',
+           isTransparent: true, autosize: true, largeChartUrl: '' };
+}
+
+// ── Stock Analyzer → 📉 Chart tab ──────────────────────────────────
+const SA_CHART_PRESETS = {
+  momentum: { label: 'Momentum · RSI + MACD',   studies: ['RSI@tv-basicstudies', 'MACD@tv-basicstudies'] },
+  trend:    { label: 'Trend · MA + Bollinger',  studies: ['MASimple@tv-basicstudies', 'MAExp@tv-basicstudies', 'BB@tv-basicstudies'] },
+  volume:   { label: 'Volume · VWAP + OBV',     studies: ['VWAP@tv-basicstudies', 'OBV@tv-basicstudies'] },
+  clean:    { label: 'Clean',                   studies: [] },
+};
+let saChartPreset = SA_CHART_PRESETS[tvLS.get('sa_chart_preset', 'momentum')] ? tvLS.get('sa_chart_preset', 'momentum') : 'momentum';
+let saChartRendered = '';   // "SYMBOL|preset" currently mounted — avoids reloading on every tab switch
+
+function saSetChartPreset(key) {
+  if (!SA_CHART_PRESETS[key]) return;
+  saChartPreset = key; tvLS.set('sa_chart_preset', key);
+  saRenderChartTab(true);
+}
+
+function saRenderChartTab(force) {
+  const host = document.getElementById('saChart');
+  if (!host) return;
+  const d = saCurrentData;
+  const sym = d ? tvSymbol(d.symbol, d.exchange) : '';
+  if (!sym) { host.innerHTML = '<div class="tv-empty">Load a ticker to see its interactive chart.</div>'; saChartRendered = ''; return; }
+  const key = sym + '|' + saChartPreset;
+  if (!force && key === saChartRendered) return;
+  saChartRendered = key;
+  const chips = Object.entries(SA_CHART_PRESETS).map(([k, p]) =>
+    `<button class="tv-chip${k === saChartPreset ? ' active' : ''}" onclick="saSetChartPreset('${k}')">${p.label}</button>`).join('');
+  host.innerHTML = `
+    <div class="tv-toolbar"><span class="tv-toolbar-label">Indicators</span>${chips}
+      <span class="tv-toolbar-hint">Change the interval, add or edit indicators and draw right on the chart.</span></div>
+    <div class="tv-box tv-h-chart" id="saTvChart"></div>
+    <div class="tv-grid-2">
+      <div><div class="tv-toolbar-label" style="margin-bottom:6px">Technical rating</div><div class="tv-box tv-h-ta" id="saTvTA"></div></div>
+      <div><div class="tv-toolbar-label" style="margin-bottom:6px">5-year trend</div><div class="tv-box tv-h-ta" id="saTvLong"></div></div>
+    </div>`;
+  const mobile = window.innerWidth <= 768;
+  tvEmbed(document.getElementById('saTvChart'), 'advanced-chart', {
+    autosize: true, symbol: sym, interval: 'D', timezone: 'exchange', theme: 'dark', style: '1', locale: 'en',
+    backgroundColor: 'rgba(13, 21, 38, 1)', gridColor: 'rgba(26, 39, 68, 0.6)',
+    withdateranges: true, hide_side_toolbar: mobile, hide_volume: false, allow_symbol_change: false,
+    save_image: false, calendar: false, studies: SA_CHART_PRESETS[saChartPreset].studies,
+    support_host: 'https://www.tradingview.com',
+  }, d.symbol + ' chart');
+  tvEmbed(document.getElementById('saTvTA'), 'technical-analysis', {
+    interval: '1D', width: '100%', height: '100%', isTransparent: true, symbol: sym,
+    showIntervalTabs: true, displayMode: 'single', locale: 'en', colorTheme: 'dark',
+  }, 'Technical analysis');
+  tvEmbed(document.getElementById('saTvLong'), 'mini-symbol-overview', tvMiniConfig(sym, '60M'), d.symbol + ' 5Y chart');
+}
+
+// ── Markets page ───────────────────────────────────────────────────
+const MK_TAPE = [
+  { proName: 'FOREXCOM:SPXUSD', title: 'S&P 500' }, { proName: 'FOREXCOM:NSXUSD', title: 'Nasdaq 100' },
+  { proName: 'FOREXCOM:DJI', title: 'Dow 30' },      { proName: 'TVC:US10Y', title: 'US 10Y' },
+  { proName: 'TVC:GOLD', title: 'Gold' },            { proName: 'FX_IDC:EURUSD', title: 'EUR/USD' },
+  { proName: 'BITSTAMP:BTCUSD', title: 'Bitcoin' },  { proName: 'BITSTAMP:ETHUSD', title: 'Ethereum' },
+];
+const MK_INDEX_MINIS = ['AMEX:SPY', 'NASDAQ:QQQ', 'AMEX:DIA', 'AMEX:IWM', 'TVC:GOLD', 'BITSTAMP:BTCUSD'];
+const MK_RANGES  = [['1D', '1D'], ['1M', '1M'], ['12M', '1Y'], ['60M', '5Y']];
+const MK_METRICS = [['change', '1D'], ['Perf.W', '1W'], ['Perf.1M', '1M'], ['Perf.YTD', 'YTD']];
+const MK_WATCH_MAX = 12;
+// Saved settings are validated — an unknown value (older/newer version) falls back to the default.
+const mkPick = (key, allowed, dflt) => { const v = tvLS.get(key, dflt); return allowed.includes(v) ? v : dflt; };
+let mkRange  = mkPick('mk_range', MK_RANGES.map(r => r[0]), '12M');
+let mkSource = mkPick('mk_heat_source', ['stocks', 'crypto'], 'stocks');
+let mkMetric = mkPick('mk_heat_metric', MK_METRICS.map(m => m[0]), 'change');
+const mkMounted = { tape: false, minis: '', heat: '', watch: '' };
+
+function mkSeg(id, items, current, fn) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = items.map(([v, label]) =>
+    `<button class="tv-chip${v === current ? ' active' : ''}" onclick="${fn}('${v}')">${label}</button>`).join('');
+}
+function mkSetRange(v)  { mkRange = v;  tvLS.set('mk_range', v);        mkRender(); }
+function mkSetSource(v) { mkSource = v; tvLS.set('mk_heat_source', v);  mkRender(); }
+function mkSetMetric(v) { mkMetric = v; tvLS.set('mk_heat_metric', v);  mkRender(); }
+function mkAnalyze(sym) {
+  if (!/^[A-Z0-9.\-]+$/.test(sym)) return;
+  showPage('stock'); saQuickLoad(sym);
+}
+
+// Each block is rebuilt only when its own settings changed, so reopening
+// the page doesn't reload a dozen iframes.
+function mkRender() {
+  if (!document.getElementById('page-markets')) return;
+  mkSeg('mkRangeSeg', MK_RANGES, mkRange, 'mkSetRange');
+  mkSeg('mkHeatSourceSeg', [['stocks', 'Stocks'], ['crypto', 'Crypto']], mkSource, 'mkSetSource');
+  mkSeg('mkHeatMetricSeg', MK_METRICS, mkMetric, 'mkSetMetric');
+
+  if (!mkMounted.tape) {
+    tvEmbed(document.getElementById('mkTape'), 'ticker-tape', {
+      symbols: MK_TAPE, showSymbolLogo: true, isTransparent: true, displayMode: 'adaptive', colorTheme: 'dark', locale: 'en',
+    }, 'Ticker tape');
+    mkMounted.tape = true;
+  }
+  if (mkMounted.minis !== mkRange) {
+    const grid = document.getElementById('mkIndexMinis');
+    grid.innerHTML = MK_INDEX_MINIS.map((s, i) => `<div class="tv-box tv-h-mini" id="mkMini${i}"></div>`).join('');
+    MK_INDEX_MINIS.forEach((s, i) => tvEmbed(document.getElementById('mkMini' + i), 'mini-symbol-overview', tvMiniConfig(s, mkRange), s.split(':')[1]));
+    mkMounted.minis = mkRange;
+  }
+  const heatKey = mkSource + '|' + mkMetric;
+  if (mkMounted.heat !== heatKey) {
+    const common = { blockColor: mkMetric, locale: 'en', symbolUrl: '', colorTheme: 'dark', isZoomEnabled: true,
+                     hasSymbolTooltip: true, isMonoSize: false, width: '100%', height: '100%' };
+    if (mkSource === 'crypto') {
+      tvEmbed(document.getElementById('mkHeatmap'), 'crypto-coins-heatmap',
+        { dataSource: 'Crypto', blockSize: 'market_cap_calc', hasTopBar: false, isDataSetEnabled: false, ...common }, 'Crypto heatmap');
+      document.getElementById('mkHeatNote').textContent = 'Crypto: block size = market cap, colour = price change for the selected period.';
+    } else {
+      tvEmbed(document.getElementById('mkHeatmap'), 'stock-heatmap',
+        { exchanges: [], dataSource: 'SPX500', grouping: 'sector', blockSize: 'market_cap_basic', hasTopBar: true, isDataSetEnabled: true, ...common }, 'Stock heatmap');
+      document.getElementById('mkHeatNote').textContent = 'Stocks: S&P 500 by sector — block size = market cap, colour = price change. Switch to Nasdaq 100, Dow 30 and other indices in the heatmap’s own top bar.';
+    }
+    mkMounted.heat = heatKey;
+  }
+  const wl = (typeof saWatchlist !== 'undefined' ? saWatchlist : []).map(w => String(w.symbol || '').toUpperCase()).filter(s => /^[A-Z0-9.\-]+$/.test(s));
+  const watchKey = wl.slice(0, MK_WATCH_MAX).join(',') + '|' + mkRange;
+  if (mkMounted.watch !== watchKey) {
+    const grid = document.getElementById('mkWatchMinis');
+    const count = document.getElementById('mkWatchCount');
+    if (!wl.length) {
+      grid.innerHTML = '<div class="tv-box"><div class="tv-empty">Your watchlist is empty — add tickers with ⭐ Watchlist in Stock Analyzer and they’ll appear here as mini-charts.</div></div>';
+      count.textContent = '';
+    } else {
+      const shown = wl.slice(0, MK_WATCH_MAX);
+      grid.innerHTML = shown.map((s, i) => `<div class="mk-card"><div class="tv-box tv-h-mini" id="mkWatch${i}"></div>
+          <div class="mk-card-actions"><button class="tv-chip" onclick="mkAnalyze('${s}')">Analyze ${s} →</button></div></div>`).join('');
+      shown.forEach((s, i) => tvEmbed(document.getElementById('mkWatch' + i), 'mini-symbol-overview', tvMiniConfig(tvSymbol(s), mkRange), s));
+      count.textContent = wl.length > MK_WATCH_MAX ? `showing ${MK_WATCH_MAX} of ${wl.length}` : `${wl.length} ticker${wl.length === 1 ? '' : 's'} · period ${MK_RANGES.find(r => r[0] === mkRange)[1]}`;
+    }
+    mkMounted.watch = watchKey;
+  }
+}
+
 function saSwitchTab(tabId, btn) {
   document.querySelectorAll('#page-stock .s-tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('#page-stock .s-tab-content').forEach(t => t.classList.remove('active'));
   if (btn) btn.classList.add('active');
   document.getElementById(tabId).classList.add('active');
+  if (tabId === 'saChart') saRenderChartTab();   // lazy: TradingView chart only when the tab is opened
 }
 
 // PDF Export
@@ -4560,7 +4849,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Service Worker registration ───────────────────────────────
 // Bump APP_VERSION AND CACHE_NAME in sw.js together on every deploy.
 // The version check below clears old caches immediately on load.
-const APP_VERSION = '2.5.2';
+const APP_VERSION = '2.6';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {

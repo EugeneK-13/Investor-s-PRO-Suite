@@ -1,8 +1,8 @@
-// sw.js — SV Pro (Stock Valuation Professional) v2.5.2
+// sw.js — SV Pro (Stock Valuation Professional) v2.6
 // GitHub Pages: https://eugenek-13.github.io/Investor-s-PRO-Suite/
 // HOW TO UPDATE: bump CACHE_NAME here AND APP_VERSION in index.html together.
 
-const CACHE_NAME = 'svpro-v2.5.2';
+const CACHE_NAME = 'svpro-v2.6';
 const BASE = '/Investor-s-PRO-Suite/';
 
 const PRECACHE_ASSETS = [
@@ -52,8 +52,8 @@ self.addEventListener('message', event => {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
 
-  // ① Finnhub — never cache
-  if (url.hostname === 'finnhub.io') {
+  // ① Finnhub and TradingView widgets — live data, never cache
+  if (url.hostname === 'finnhub.io' || /(^|\.)tradingview(-widget)?\.com$/.test(url.hostname)) {
     event.respondWith(fetch(event.request));
     return;
   }
