@@ -143,6 +143,7 @@ html{height:100%;-webkit-overflow-scrolling:touch}body{font-family:'DM Sans',-ap
 #page-stock .valuation-card{background:linear-gradient(135deg,#ef4444 0%,#dc2626 100%);color:#fff;border-radius:15px;padding:30px;text-align:center;margin-bottom:30px}
 #page-stock .valuation-card.undervalued{background:linear-gradient(135deg,#10b981 0%,#059669 100%)}
 #page-stock .valuation-card.hold{background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%)}
+#page-stock .valuation-card.unrated{background:linear-gradient(135deg,#64748b 0%,#475569 100%)}
 #page-stock .fair-value{font-size:3em;font-weight:700;margin:10px 0}
 #page-stock .potential{font-size:1.3em;margin:10px 0}
 #page-stock .valuation-methods{background:#f8fafc;border-radius:12px;padding:20px;margin-bottom:20px}
@@ -2995,7 +2996,9 @@ function saGetMetricBadge(type, value) {
 }
 
 function saMC(label, value, badgeType, badgeVal) {
-  const badge = badgeType ? saGetMetricBadge(badgeType, badgeVal !== undefined ? badgeVal : parseFloat(value)) : '';
+  // No badge on missing data — a missing field reads as 0, which would
+  // otherwise get a verdict (e.g. Revenue Growth N/A → "✗ Neg").
+  const badge = (badgeType && value !== 'N/A') ? saGetMetricBadge(badgeType, badgeVal !== undefined ? badgeVal : parseFloat(value)) : '';
   return `<div class="metric-card"><div class="metric-label" style="display:flex;align-items:center;flex-wrap:wrap;gap:2px">${label}${badge}</div><div class="metric-value">${value}</div></div>`;
 }
 
@@ -3178,9 +3181,67 @@ async function saLoadAnalyst(data, val) {
   if (target) target.innerHTML = saAnalystHtml(r, safeNum(data.price), safeNum(val && val.fairValue));
 }
 
+// Cash runway — how long cash lasts at the current free-cash-flow burn.
+// Used when no valuation method applies (pre-profit / pre-revenue
+// companies), where survival without new financing is the key question.
+// FCF includes capex, so a company building a plant shows its full burn.
+function saCashRunway(data) {
+  const shares = safeNum(data.sharesOutstanding);
+  const cashPS = (data.cashPerShare === null || data.cashPerShare === undefined) ? null : safeNum(data.cashPerShare);
+  const fcfPS  = safeNum(data.freeCashFlowPerShare);
+  if (!(shares > 0) || cashPS === null || cashPS <= 0) return { na: 'cash not reported by Finnhub' };
+  const cash = cashPS * shares;
+  if (fcfPS === 0) return { na: 'free cash flow not reported by Finnhub', cash };
+  const fcf = fcfPS * shares;
+  if (fcf > 0) return { cash, fcf, selfFunding: true, cls: 'pass' };
+  const months = cash / (-fcf) * 12;
+  const cls = months >= 24 ? 'pass' : months >= 12 ? 'hold' : 'fail';
+  return { cash, burn: -fcf, months, cls };
+}
+
 function saRenderValuation(data) {
   try {
   const val = saCalculateValuation(data);
+  // No method applies → there is no fair value. Show that explicitly
+  // instead of $0.00 / SELL, plus the cash runway that matters here.
+  if (!val.validVals.length) {
+    const rw = saCashRunway(data);
+    const fmtB = v => saFormatBigNumber(v);
+    let rwHtml;
+    if (rw.na) rwHtml = `Cash runway: n/a — ${rw.na}.`;
+    else if (rw.selfFunding) rwHtml = `Free cash flow is positive (${fmtB(rw.fcf)} TTM) — the company funds itself; cash ${fmtB(rw.cash)}.`;
+    else {
+      const yrs = rw.months >= 24 ? ` (~${(rw.months / 12).toFixed(1)} yrs)` : '';
+      const color = rw.cls === 'pass' ? '#bbf7d0' : rw.cls === 'hold' ? '#fde68a' : '#fecaca';
+      const verdict = rw.cls === 'pass' ? 'comfortable — no near-term need to raise money'
+        : rw.cls === 'hold' ? 'expect new financing (share issuance or debt) within 1–2 years'
+        : 'new financing is likely soon — high risk of dilution';
+      rwHtml = `<strong style="font-size:1.25em;color:${color}">${rw.months.toFixed(0)} months${yrs}</strong> of cash runway — ${verdict}.<br>
+        <span style="opacity:.85">Cash ${fmtB(rw.cash)} ÷ FCF burn ${fmtB(rw.burn)}/yr (TTM, incl. capex). Assumes the burn stays at today's rate.</span>`;
+    }
+    document.getElementById('saValuation').innerHTML = `
+      <div class="valuation-card unrated">
+        <div>Fair Value</div>
+        <div class="fair-value" style="font-size:1.6em">Not rated</div>
+        <div style="margin-top:8px;font-size:.9em;line-height:1.55;opacity:.95">None of the 8 methods applies — the company has no positive earnings, cash flow, dividends or meaningful revenue yet.
+          Pre-profit companies are valued on their project or asset value (NAV) and on how long their cash lasts, which aren't available from Finnhub.</div>
+        <div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.25);font-size:.85em;line-height:1.6">${rwHtml}</div>
+      </div>
+      <div id="saAnalystCard"><div style="margin-top:14px;padding:12px 14px;background:#eef2f7;border:1px solid rgba(15,23,42,.12);border-radius:10px;font-size:.82em;color:#475569">👥 Loading analyst consensus…</div></div>
+      <div class="valuation-methods">
+        <div class="method-title">💎 All Methods (0 of 8 used)</div>
+        <div class="method-row"><span>1. Graham Number</span>${saMethodCell(val,'graham','graham')}</div>
+        <div class="method-row"><span>2. P/E (${val.peMultiple}x)</span>${saMethodCell(val,'peVal','pe')}</div>
+        <div class="method-row"><span>3. Forward P/E</span>${saMethodCell(val,'forwardPeVal','forwardPe')}</div>
+        <div class="method-row"><span>4. Lynch Fair Value</span>${saMethodCell(val,'pegVal','peg')}</div>
+        <div class="method-row"><span>5. DCF</span>${saMethodCell(val,'dcfVal','dcf')}</div>
+        <div class="method-row"><span>6. DDM</span>${saMethodCell(val,'ddmVal','ddm')}</div>
+        <div class="method-row"><span>7. EV/EBITDA</span>${saMethodCell(val,'evEbitdaVal','evEbitda')}</div>
+        <div class="method-row"><span>8. Price/Sales</span>${saMethodCell(val,'psVal','ps')}</div>
+      </div>`;
+    saLoadAnalyst(data, val).catch(e => console.error('[saLoadAnalyst]', e));
+    return;
+  }
   let cardClass = 'valuation-card', rec = '🔴 SELL';
   if (val.potential > 20) { cardClass += ' undervalued'; rec = '🟢 BUY'; }
   else if (val.potential > 0) { cardClass += ' hold'; rec = '🟡 HOLD'; }
@@ -5105,8 +5166,9 @@ async function saExportFullPDF() {
     const val = saCalculateValuation(d);
     const pot = safeNum(val.potential);
     const potSign = pot > 0 ? '+' : '';
-    const recText = pot > 20 ? 'BUY' : pot > 0 ? 'HOLD' : 'SELL';
-    const recColor = pot > 20 ? [5,150,105] : pot > 0 ? [180,120,0] : [220,38,38];
+    const unrated = !val.validVals.length;   // no method applies → no fair value, no signal
+    const recText = unrated ? 'N/R' : pot > 20 ? 'BUY' : pot > 0 ? 'HOLD' : 'SELL';
+    const recColor = unrated ? [100,116,139] : pot > 20 ? [5,150,105] : pot > 0 ? [180,120,0] : [220,38,38];
 
     // Valuation summary box
     pdf.setFillColor(241, 245, 249);
@@ -5117,11 +5179,11 @@ async function saExportFullPDF() {
     pdf.text('Fair Value:', M + 4, y + 9);
     pdf.setTextColor(59, 130, 246);
     pdf.setFontSize(16);
-    pdf.text('$' + safeNum(val.fairValue).toFixed(2), M + 36, y + 10);
+    pdf.text(unrated ? 'Not rated' : '$' + safeNum(val.fairValue).toFixed(2), M + 36, y + 10);
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(11);
     pdf.setTextColor(71, 85, 105);
-    pdf.text('Upside: ' + potSign + pot.toFixed(1) + '%', M + 90, y + 9);
+    pdf.text(unrated ? 'No method applies (pre-profit)' : 'Upside: ' + potSign + pot.toFixed(1) + '%', M + 90, y + 9);
     pdf.setFillColor(...recColor);
     pdf.rect(PW - M - 28, y + 3, 25, 13, 'F');
     pdf.setFont('helvetica', 'bold');
@@ -5140,7 +5202,7 @@ async function saExportFullPDF() {
       ['DDM (Gordon)',     val.ddmVal    > 0 ? '$' + val.ddmVal.toFixed(2)    : 'N/A'],
       ['EV/EBITDA',        val.evEbitdaVal > 0 ? '$' + val.evEbitdaVal.toFixed(2) : 'N/A'],
       ['Price/Sales',      val.psVal     > 0 ? '$' + val.psVal.toFixed(2)     : 'N/A'],
-      ['Weighted Avg (' + val.validVals.length + ' methods)', '$' + safeNum(val.fairValue).toFixed(2)],
+      ['Weighted Avg (' + val.validVals.length + ' methods)', unrated ? 'Not rated' : '$' + safeNum(val.fairValue).toFixed(2)],
     ];
     methods.forEach((row, i) => drawRow(row[0], row[1], i % 2 === 0));
     y += 4;
@@ -5221,11 +5283,12 @@ function saCopyToClipboard() {
     const d   = saCurrentData;
     const val = saCalculateValuation(d);
     const pot = safeNum(val.potential);
-    const rec = pot > 20 ? '🟢 BUY' : pot > 0 ? '🟡 HOLD' : '🔴 SELL';
+    const unrated = !val.validVals.length;
+    const rec = unrated ? '⚪ Not rated' : pot > 20 ? '🟢 BUY' : pot > 0 ? '🟡 HOLD' : '🔴 SELL';
     const pe  = safeNum(d.pe)  > 0 ? safeNum(d.pe).toFixed(2)  : 'N/A';
     const eps = safeNum(d.eps) !== 0 ? '$' + safeNum(d.eps).toFixed(2) : 'N/A';
     const roe = safeNum(d.roe) !== 0 ? safeNum(d.roe).toFixed(2) + '%' : 'N/A';
-    const text = `📊 *${d.name} (${d.symbol})*\n\n💰 Price: $${safeNum(d.price).toFixed(2)}\n🏢 Sector: ${d.sector || 'N/A'} • ${val.profile} profile\n\n*Valuation*\nFair Value: $${safeNum(val.fairValue).toFixed(2)} (${val.validVals.length} methods)\nUpside: ${pot > 0 ? '+' : ''}${pot.toFixed(1)}%\nSignal: ${rec}\n\n*Metrics*\nP/E: ${pe}\nEPS: ${eps}\nROE: ${roe}\n\nSource: Finnhub API`;
+    const text = `📊 *${d.name} (${d.symbol})*\n\n💰 Price: $${safeNum(d.price).toFixed(2)}\n🏢 Sector: ${d.sector || 'N/A'} • ${val.profile} profile\n\n*Valuation*\n${unrated ? 'Fair Value: not rated — no method applies (pre-profit)' : `Fair Value: $${safeNum(val.fairValue).toFixed(2)} (${val.validVals.length} methods)\nUpside: ${pot > 0 ? '+' : ''}${pot.toFixed(1)}%`}\nSignal: ${rec}\n\n*Metrics*\nP/E: ${pe}\nEPS: ${eps}\nROE: ${roe}\n\nSource: Finnhub API`;
     navigator.clipboard.writeText(text)
       .then(() => saShowNotification('✓ Copied!'))
       .catch(() => saShowNotification('⚠️ Clipboard unavailable'));
@@ -5373,7 +5436,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Service Worker registration ───────────────────────────────
 // Bump APP_VERSION AND CACHE_NAME in sw.js together on every deploy.
 // The version check below clears old caches immediately on load.
-const APP_VERSION = '2.7';
+const APP_VERSION = '2.7.1';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
