@@ -2900,6 +2900,17 @@ async function saLoadStock() {
       // 52W range
       high52:               safeNum(m['52WeekHigh']),
       low52:                safeNum(m['52WeekLow']),
+      // Trend Check inputs (null when missing — see saPickMetric)
+      high52Date:           m['52WeekHighDate'] || '',
+      low52Date:            m['52WeekLowDate']  || '',
+      ret13w:               saPickMetric(m, ['13WeekPriceReturnDaily'], null),
+      ret26w:               saPickMetric(m, ['26WeekPriceReturnDaily'], null),
+      ret52w:               saPickMetric(m, ['52WeekPriceReturnDaily'], null),
+      retYtd:               saPickMetric(m, ['yearToDatePriceReturnDaily'], null),
+      relSP13w:             saPickMetric(m, ['priceRelativeToS&P50013Week'], null),
+      relSP52w:             saPickMetric(m, ['priceRelativeToS&P50052Week'], null),
+      vol10d:               saPickMetric(m, ['10DayAverageTradingVolume'], null),
+      vol3m:                saPickMetric(m, ['3MonthAverageTradingVolume'], null),
       // Company info
       description:          profile.description || '',
       logo:                 profile.logo        || '',
@@ -4078,20 +4089,38 @@ function saExtractSbc(filing) {
   return { sbc, ocf, capex: capex === null ? null : Math.abs(capex) };
 }
 
+// One /stock/financials-reported request per ticker, shared by the Burry
+// SBC check and the Red Flags scores. The in-flight promise is cached so
+// both callers wait on the same request. Transient failures (network,
+// rate limit, other HTTP errors) are not cached, so a reload retries.
+const saFilingsCache = {};
+function saFetchFilings(symbol) {
+  if (saFilingsCache[symbol]) return saFilingsCache[symbol];
+  const p = (async () => {
+    let res;
+    try { res = await saFetch(`/stock/financials-reported?symbol=${encodeURIComponent(symbol)}&freq=annual`); }
+    catch (e) { return { na: 'Network error while fetching the annual report — try reloading', transient: true }; }
+    if (res.status === 401 || res.status === 403) return { na: 'Financials-as-reported isn\'t available on your Finnhub plan' };
+    if (res.status === 429) return { na: 'Finnhub rate limit reached — reload in a minute', transient: true };
+    if (!res.ok) return { na: `Finnhub error (HTTP ${res.status})`, transient: true };
+    let json = null;
+    try { json = await res.json(); } catch (e) { /* handled below */ }
+    const filings = (json && Array.isArray(json.data) ? json.data : [])
+      .slice().sort((a, b) => String(b.endDate || b.year || '').localeCompare(String(a.endDate || a.year || '')));
+    if (!filings.length) return { na: 'No SEC filings on Finnhub for this ticker (usually a non-US listing)' };
+    return { filings };
+  })();
+  saFilingsCache[symbol] = p;
+  p.then(r => { if (r.transient && saFilingsCache[symbol] === p) delete saFilingsCache[symbol]; });
+  return p;
+}
+
 async function saFetchSbc(symbol) {
   if (saSbcCache[symbol]) return saSbcCache[symbol];
   const keep = r => (saSbcCache[symbol] = r);
-  let res;
-  try { res = await saFetch(`/stock/financials-reported?symbol=${encodeURIComponent(symbol)}&freq=annual`); }
-  catch (e) { return { na: 'Network error while fetching the annual report — try reloading' }; }   // not cached
-  if (res.status === 401 || res.status === 403) return keep({ na: 'Financials-as-reported isn\'t available on your Finnhub plan' });
-  if (res.status === 429) return { na: 'Finnhub rate limit reached — reload in a minute' };            // not cached
-  if (!res.ok) return { na: `Finnhub error (HTTP ${res.status})` };
-  let json = null;
-  try { json = await res.json(); } catch (e) { /* handled below */ }
-  const filings = (json && Array.isArray(json.data) ? json.data : [])
-    .slice().sort((a, b) => String(b.endDate || b.year || '').localeCompare(String(a.endDate || a.year || '')));
-  if (!filings.length) return keep({ na: 'No SEC filings on Finnhub for this ticker (usually a non-US listing)' });
+  const fr = await saFetchFilings(symbol);
+  if (fr.na) return fr.transient ? { na: fr.na } : keep({ na: fr.na });
+  const filings = fr.filings;
   // Latest filing that actually tags SBC — look back at most 2 years.
   for (const f of filings.slice(0, 2)) {
     const x = saExtractSbc(f);
@@ -4190,6 +4219,479 @@ async function saLoadBurryCheck(data) {
   target.innerHTML = saBurryHtml(a);
   const colors = { pass: '#10b981', hold: '#f59e0b', fail: '#ef4444' };
   setVerdict(a.na ? 'n/a' : a.verdict, a.na ? '#64748b' : (colors[a.cls] || '#64748b'));
+}
+
+// ══ Red Flags: Altman Z · Piotroski F · Beneish M ════════════════════
+// Three classic accounting-based scores, read from the same annual
+// filings as the Burry check (one shared request). They complement Debt
+// Safety: Altman = bankruptcy risk, Piotroski = is the business getting
+// stronger or weaker, Beneish = signs of earnings manipulation.
+// Not meaningful for banks/insurers (their balance sheet is the product).
+const SA_RF_CONCEPTS = {
+  assets:      ['bs', ['Assets']],
+  curAssets:   ['bs', ['AssetsCurrent', 'CurrentAssets']],
+  curLiab:     ['bs', ['LiabilitiesCurrent', 'CurrentLiabilities']],
+  liab:        ['bs', ['Liabilities']],
+  equity:      ['bs', ['StockholdersEquity', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest', 'EquityAttributableToOwnersOfParent', 'Equity']],
+  liabEq:      ['bs', ['LiabilitiesAndStockholdersEquity', 'EquityAndLiabilities']],
+  retained:    ['bs', ['RetainedEarningsAccumulatedDeficit', 'RetainedEarnings']],
+  receivables: ['bs', ['AccountsReceivableNetCurrent', 'ReceivablesNetCurrent', 'AccountsNotesAndLoansReceivableNetCurrent', 'TradeAndOtherCurrentReceivables', 'AccountsReceivableNet']],
+  ppe:         ['bs', ['PropertyPlantAndEquipmentNet', 'PropertyPlantAndEquipmentAndFinanceLeaseRightOfUseAssetAfterAccumulatedDepreciationAndAmortization', 'PropertyPlantAndEquipment']],
+  securities:  ['bs', ['MarketableSecuritiesCurrent', 'ShortTermInvestments', 'AvailableForSaleSecuritiesDebtSecuritiesCurrent', 'CurrentFinancialAssetsAtFairValueThroughProfitOrLoss']],
+  ltDebt:      ['bs', ['LongTermDebtNoncurrent', 'LongTermDebtAndCapitalLeaseObligations', 'LongTermDebtAndFinanceLeaseLiabilitiesNoncurrent', 'LongTermDebt', 'NoncurrentPortionOfNoncurrentBorrowings']],
+  revenue:     ['ic', ['Revenues', 'RevenueFromContractWithCustomerExcludingAssessedTax', 'RevenueFromContractWithCustomerIncludingAssessedTax', 'SalesRevenueNet', 'Revenue']],
+  cogs:        ['ic', ['CostOfRevenue', 'CostOfGoodsAndServicesSold', 'CostOfGoodsSold', 'CostOfServices', 'CostOfSales']],
+  grossProfit: ['ic', ['GrossProfit']],
+  opIncome:    ['ic', ['OperatingIncomeLoss', 'ProfitLossFromOperatingActivities']],
+  netIncome:   ['ic', ['NetIncomeLoss', 'ProfitLoss', 'NetIncomeLossAvailableToCommonStockholdersBasic', 'ProfitLossAttributableToOwnersOfParent']],
+  sga:         ['ic', ['SellingGeneralAndAdministrativeExpense']],
+  selling:     ['ic', ['SellingAndMarketingExpense', 'SellingExpense']],
+  gna:         ['ic', ['GeneralAndAdministrativeExpense']],
+  shares:      ['ic', ['WeightedAverageNumberOfSharesOutstandingBasic', 'WeightedAverageNumberOfDilutedSharesOutstanding']],
+  cfo:         ['cf', ['NetCashProvidedByUsedInOperatingActivities', 'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations', 'CashFlowsFromUsedInOperatingActivities']],
+  dep:         ['cf', ['DepreciationDepletionAndAmortization', 'DepreciationAndAmortization', 'DepreciationAmortizationAndAccretionNet', 'Depreciation', 'DepreciationAndAmortisationExpense']],
+};
+
+// Read one annual filing into plain numbers (null = not tagged).
+function saRfExtract(filing) {
+  const rep = (filing && filing.report) || {};
+  const sec = { bs: saReportItems(rep.bs), ic: saReportItems(rep.ic), cf: saReportItems(rep.cf) };
+  const out = { year: filing && filing.year, endDate: filing && filing.endDate };
+  for (const key of Object.keys(SA_RF_CONCEPTS)) {
+    const [s, names] = SA_RF_CONCEPTS[key];
+    const wantShares = key === 'shares';
+    const ok = it => it && isFinite(parseFloat(it.value)) &&
+      (wantShares ? (!it.unit || /share/i.test(it.unit)) : (!it.unit || /usd/i.test(it.unit)));
+    let v = null;
+    for (const n of names) {
+      const re = new RegExp('(^|[_:])' + n + '$');
+      const hit = sec[s].find(it => ok(it) && re.test(String(it.concept || '')));
+      if (hit) { v = parseFloat(hit.value); break; }
+    }
+    out[key] = v;
+  }
+  // Fallbacks for items companies often tag differently.
+  if (out.liab === null && out.liabEq !== null && out.equity !== null) out.liab = out.liabEq - out.equity;
+  if (out.sga === null && out.selling !== null && out.gna !== null) out.sga = out.selling + out.gna;
+  if (out.grossProfit === null && out.revenue !== null && out.cogs !== null) out.grossProfit = out.revenue - out.cogs;
+  if (out.cogs === null && out.revenue !== null && out.grossProfit !== null) out.cogs = out.revenue - out.grossProfit;
+  return out;
+}
+
+const saRfNum = v => v !== null && v !== undefined && isFinite(v);
+
+// Altman Z-score (original 1968 public-company model).
+//   Z = 1.2·WC/TA + 1.4·RE/TA + 3.3·EBIT/TA + 0.6·MarketCap/TL + 1.0·Sales/TA
+//   > 2.99 safe · 1.81–2.99 grey · < 1.81 distress
+function saAltmanZ(f, marketCap) {
+  const need = { 'total assets': f.assets, 'total liabilities': f.liab, 'current assets': f.curAssets,
+                 'current liabilities': f.curLiab, 'retained earnings': f.retained,
+                 'operating income': f.opIncome, revenue: f.revenue };
+  const missing = Object.keys(need).filter(k => !saRfNum(need[k]));
+  if (!(marketCap > 0)) missing.push('market cap');
+  if (missing.length) return { na: 'not tagged in the filing: ' + missing.join(', ') };
+  if (!(f.assets > 0) || !(f.liab > 0)) return { na: 'total assets / liabilities not positive' };
+  const x1 = (f.curAssets - f.curLiab) / f.assets, x2 = f.retained / f.assets, x3 = f.opIncome / f.assets,
+        x4 = marketCap / f.liab, x5 = f.revenue / f.assets;
+  const z = 1.2 * x1 + 1.4 * x2 + 3.3 * x3 + 0.6 * x4 + 1.0 * x5;
+  const zone = z > 2.99 ? 'Safe' : z >= 1.81 ? 'Grey zone' : 'Distress';
+  const cls = z > 2.99 ? 'pass' : z >= 1.81 ? 'hold' : 'fail';
+  // Name the weakest component so the score is explainable.
+  const parts = [
+    { n: 'working capital', v: 1.2 * x1 }, { n: 'retained earnings', v: 1.4 * x2 },
+    { n: 'operating profit', v: 3.3 * x3 }, { n: 'market cap vs liabilities', v: 0.6 * x4 },
+    { n: 'asset turnover', v: 1.0 * x5 }];
+  const weakest = parts.slice().sort((a, b) => a.v - b.v)[0];
+  return { z, zone, cls, parts, weakest: weakest.n };
+}
+
+// Piotroski F-score: 9 yes/no tests comparing the latest year with the one
+// before. ROA uses year-end assets (common simplification).
+function saPiotroski(c, p) {
+  const t = [];
+  const add = (group, name, pass) => t.push({ group, name, pass });   // pass: true/false/null
+  const roa  = f => saRfNum(f.netIncome) && f.assets > 0 ? f.netIncome / f.assets : null;
+  const lev  = f => saRfNum(f.ltDebt) && f.assets > 0 ? f.ltDebt / f.assets : null;
+  const cr   = f => saRfNum(f.curAssets) && f.curLiab > 0 ? f.curAssets / f.curLiab : null;
+  const gm   = f => saRfNum(f.grossProfit) && f.revenue > 0 ? f.grossProfit / f.revenue : null;
+  const at   = f => saRfNum(f.revenue) && f.assets > 0 ? f.revenue / f.assets : null;
+  const cmp  = (a, b, fn) => (a !== null && b !== null) ? fn(a, b) : null;
+  add('Profitability', 'Net income > 0', saRfNum(c.netIncome) ? c.netIncome > 0 : null);
+  add('Profitability', 'Operating cash flow > 0', saRfNum(c.cfo) ? c.cfo > 0 : null);
+  add('Profitability', 'ROA improved', p ? cmp(roa(c), roa(p), (a, b) => a > b) : null);
+  add('Profitability', 'Cash flow > net income (earnings quality)', saRfNum(c.cfo) && saRfNum(c.netIncome) ? c.cfo > c.netIncome : null);
+  add('Balance sheet', 'Long-term debt / assets fell', p ? cmp(lev(c), lev(p), (a, b) => a <= b) : null);
+  add('Balance sheet', 'Current ratio improved', p ? cmp(cr(c), cr(p), (a, b) => a > b) : null);
+  add('Balance sheet', 'No share dilution (≤0.5%)', p && c.shares > 0 && p.shares > 0 ? c.shares <= p.shares * 1.005 : null);
+  add('Efficiency', 'Gross margin improved', p ? cmp(gm(c), gm(p), (a, b) => a > b) : null);
+  add('Efficiency', 'Asset turnover improved', p ? cmp(at(c), at(p), (a, b) => a > b) : null);
+  const avail = t.filter(x => x.pass !== null).length;
+  const score = t.filter(x => x.pass === true).length;
+  if (avail < 6) return { tests: t, na: `only ${avail} of 9 tests could be computed from the filings` };
+  const share = score / avail;
+  const verdict = share >= 7 / 9 ? 'Strong' : share > 3 / 9 ? 'Average' : 'Weak';
+  return { tests: t, score, avail, verdict, cls: verdict === 'Strong' ? 'pass' : verdict === 'Average' ? 'hold' : 'fail' };
+}
+
+// Beneish M-score (8-variable model). Indices a reporting manipulator
+// typically shows are listed in SA_BENEISH_FLAG (Beneish 1999 means).
+//   M > −1.78 likely manipulator · −2.22…−1.78 grey · < −2.22 unlikely
+// Up to 3 indices that can't be computed are set to the neutral value
+// (1, or 0 for TATA) — the usual practice — and listed in the output.
+const SA_BENEISH_FLAG = { DSRI: 1.465, GMI: 1.193, AQI: 1.254, SGI: 1.607, DEPI: 1.077, SGAI: 1.041, LVGI: 1.111, TATA: 0.031 };
+const SA_BENEISH_INFO = {
+  DSRI: 'receivables growing faster than sales', GMI: 'gross margin deteriorating', AQI: 'more costs capitalised as soft assets',
+  SGI: 'sales growth (pressure to keep it up)', DEPI: 'slower depreciation', SGAI: 'overhead growing faster than sales',
+  LVGI: 'leverage rising', TATA: 'profit not backed by cash (accruals)' };
+function saBeneish(c, p) {
+  if (!p) return { na: 'needs two consecutive annual filings' };
+  if (!(c.revenue > 0) || !(p.revenue > 0)) return { na: 'revenue not tagged for both years' };
+  const div = (a, b) => (saRfNum(a) && saRfNum(b) && b !== 0) ? a / b : null;
+  const idx = {};
+  idx.DSRI = div(div(c.receivables, c.revenue), div(p.receivables, p.revenue));
+  const gmC = div(c.grossProfit, c.revenue), gmP = div(p.grossProfit, p.revenue);
+  idx.GMI  = (gmC > 0 && gmP !== null) ? gmP / gmC : null;
+  const aq = f => (f.assets > 0 && saRfNum(f.curAssets) && saRfNum(f.ppe)) ? 1 - (f.curAssets + f.ppe + (f.securities || 0)) / f.assets : null;
+  idx.AQI  = div(aq(c), aq(p));
+  idx.SGI  = c.revenue / p.revenue;
+  const dr = f => (saRfNum(f.dep) && saRfNum(f.ppe) && f.dep + f.ppe > 0) ? f.dep / (f.dep + f.ppe) : null;
+  idx.DEPI = div(dr(p), dr(c));
+  idx.SGAI = div(div(c.sga, c.revenue), div(p.sga, p.revenue));
+  const lv = f => (f.assets > 0 && saRfNum(f.curLiab) && saRfNum(f.ltDebt)) ? (f.curLiab + f.ltDebt) / f.assets : null;
+  idx.LVGI = div(lv(c), lv(p));
+  idx.TATA = (saRfNum(c.netIncome) && saRfNum(c.cfo) && c.assets > 0) ? (c.netIncome - c.cfo) / c.assets : null;
+  const neutral = Object.keys(idx).filter(k => idx[k] === null || !isFinite(idx[k]));
+  if (neutral.length > 3) return { na: `${neutral.length} of 8 inputs missing in the filings (${neutral.join(', ')})` };
+  const v = {};
+  for (const k of Object.keys(idx)) v[k] = neutral.includes(k) ? (k === 'TATA' ? 0 : 1) : idx[k];
+  const m = -4.84 + 0.920 * v.DSRI + 0.528 * v.GMI + 0.404 * v.AQI + 0.892 * v.SGI + 0.115 * v.DEPI
+          - 0.172 * v.SGAI + 4.679 * v.TATA - 0.327 * v.LVGI;
+  const verdict = m > -1.78 ? 'Red flag' : m >= -2.22 ? 'Grey zone' : 'Unlikely';
+  const cls = m > -1.78 ? 'fail' : m >= -2.22 ? 'hold' : 'pass';
+  const flagged = Object.keys(v).filter(k => !neutral.includes(k) && v[k] > SA_BENEISH_FLAG[k]);
+  return { m, verdict, cls, idx: v, neutral, flagged, fastGrowth: v.SGI > 1.4 };
+}
+
+// Pure assessment (no DOM) so it can be tested in isolation.
+function saRedFlagsAssess(data, fr) {
+  if (!fr || fr.na) return { na: (fr && fr.na) || 'Not available' };
+  if (SA_FINANCIAL_SECTORS.test(data.sector || '')) {
+    return { na: 'Not applicable to banks and insurers — these scores were built for industrial/commercial companies', notApplicable: true };
+  }
+  const filings = fr.filings || [];
+  const c = saRfExtract(filings[0]);
+  let p = filings[1] ? saRfExtract(filings[1]) : null;
+  let gapNote = '';
+  if (p && c.year && p.year && Math.abs(c.year - p.year) !== 1) { gapNote = `previous filing is FY${p.year}, not FY${c.year - 1}`; }
+  const altman = saAltmanZ(c, safeNum(data.marketCap));
+  const piotroski = saPiotroski(c, p);
+  const beneish = saBeneish(c, p);
+  const reds = [altman.cls, piotroski.cls, beneish.cls].filter(x => x === 'fail').length;
+  const greys = [altman.cls, piotroski.cls, beneish.cls].filter(x => x === 'hold').length;
+  const scored = [altman, piotroski, beneish].filter(x => !x.na).length;
+  let verdict, color;
+  if (!scored) { verdict = 'n/a'; color = '#64748b'; }
+  else if (reds >= 2) { verdict = reds + ' red flags'; color = '#ef4444'; }
+  else if (reds === 1) { verdict = '1 red flag'; color = '#ef4444'; }
+  else if (greys) { verdict = 'Caution'; color = '#f59e0b'; }
+  else { verdict = 'Clean'; color = '#10b981'; }
+  return { year: c.year, prevYear: p && p.year, gapNote, altman, piotroski, beneish, reds, greys, scored, verdict, color };
+}
+
+function saRedFlagsHtml(a) {
+  const note = t => `<span style="opacity:.7;font-size:.9em">${t}</span>`;
+  const icon = cls => cls === 'pass' ? '✓' : cls === 'fail' ? '✗' : cls === 'hold' ? '~' : '–';
+  if (a.na) return `<div class="criteria-item"><span>–</span><span><strong>n/a</strong> — ${escapeHtml(a.na)}</span></div>`;
+  const rows = [];
+  const period = a.year ? `FY${escapeHtml(String(a.year))}${a.prevYear ? ' vs FY' + escapeHtml(String(a.prevYear)) : ''}` : '';
+
+  // Altman
+  const al = a.altman;
+  if (al.na) rows.push(`<div class="criteria-item"><span>–</span><span>Altman Z-score: <strong>n/a</strong> ${note('— ' + escapeHtml(al.na))}</span></div>`);
+  else rows.push(`<div class="criteria-item ${al.cls}"><span>${icon(al.cls)}</span><span>Altman Z-score: <strong>${al.z.toFixed(2)}</strong> · ${al.zone} ${note('— bankruptcy risk · >2.99 safe · <1.81 distress' + (al.cls !== 'pass' ? ' · weakest: ' + al.weakest : ''))}</span></div>`);
+
+  // Piotroski
+  const pi = a.piotroski;
+  if (pi.na) rows.push(`<div class="criteria-item"><span>–</span><span>Piotroski F-score: <strong>n/a</strong> ${note('— ' + escapeHtml(pi.na))}</span></div>`);
+  else {
+    const of = pi.avail === 9 ? '9' : `${pi.avail} <span style="opacity:.7">(${9 - pi.avail} n/a)</span>`;
+    const tests = pi.tests.map(t => `<div style="display:flex;gap:6px;padding:2px 0"><span style="width:14px;color:${t.pass === true ? '#059669' : t.pass === false ? '#dc2626' : '#94a3b8'}">${t.pass === true ? '✓' : t.pass === false ? '✗' : '–'}</span><span>${t.name}</span></div>`).join('');
+    rows.push(`<div class="criteria-item ${pi.cls}" style="align-items:flex-start"><span>${icon(pi.cls)}</span><span style="flex:1">Piotroski F-score: <strong>${pi.score}/${of}</strong> · ${pi.verdict} ${note('— business quality trend · 7–9 strong · 0–3 weak')}
+      <details style="margin-top:6px;font-size:.85em"><summary style="cursor:pointer;opacity:.8">Show the 9 tests</summary><div style="margin-top:4px">${tests}</div></details></span></div>`);
+  }
+
+  // Beneish
+  const be = a.beneish;
+  if (be.na) rows.push(`<div class="criteria-item"><span>–</span><span>Beneish M-score: <strong>n/a</strong> ${note('— ' + escapeHtml(be.na))}</span></div>`);
+  else {
+    const list = Object.keys(be.idx).map(k => {
+      const neu = be.neutral.includes(k), hot = be.flagged.includes(k);
+      return `<div style="display:flex;gap:6px;padding:2px 0"><span style="width:44px;font-weight:700;color:${hot ? '#dc2626' : '#334155'}">${k}</span><span style="width:48px">${neu ? 'n/a' : be.idx[k].toFixed(k === 'TATA' ? 3 : 2)}</span><span style="opacity:.75">${SA_BENEISH_INFO[k]}${hot ? ' ⚠' : ''}</span></div>`;
+    }).join('');
+    const extra = [];
+    if (be.flagged.length) extra.push('above manipulator average: ' + be.flagged.join(', '));
+    if (be.neutral.length) extra.push('set to neutral (missing): ' + be.neutral.join(', '));
+    rows.push(`<div class="criteria-item ${be.cls}" style="align-items:flex-start"><span>${icon(be.cls)}</span><span style="flex:1">Beneish M-score: <strong>${be.m.toFixed(2)}</strong> · ${be.verdict} ${note('— earnings-manipulation risk · > −1.78 red flag · < −2.22 unlikely')}
+      ${extra.length ? `<div style="font-size:.85em;opacity:.8;margin-top:3px">${extra.join(' · ')}</div>` : ''}
+      ${be.fastGrowth && be.cls !== 'pass' ? `<div style="font-size:.85em;opacity:.8;margin-top:3px">Fast revenue growth on its own lifts the score (SGI ${be.idx.SGI.toFixed(2)}) — a growth company can land here without any manipulation.</div>` : ''}
+      <details style="margin-top:6px;font-size:.85em"><summary style="cursor:pointer;opacity:.8">Show the 8 indices</summary><div style="margin-top:4px">${list}</div></details></span></div>`);
+  }
+
+  const summary = a.reds >= 2 ? 'Several accounting-based warnings at once — treat any valuation upside with extra caution.'
+    : a.reds === 1 ? 'One score is in its danger zone — read what drives it before relying on the valuation.'
+    : a.greys ? 'No score is in its danger zone, but at least one is borderline.'
+    : 'None of the three scores raises a warning.';
+  rows.push(`<div style="font-size:.78rem;color:#475569;line-height:1.5;margin-top:4px">${summary}${period ? ` Source: annual filings ${period}.` : ''}${a.gapNote ? ' ⚠ ' + escapeHtml(a.gapNote) + '.' : ''}</div>`);
+  return rows.join('');
+}
+
+async function saLoadRedFlags(data) {
+  const body = document.getElementById('saRedFlagsBody');
+  if (!body) return;
+  const sym = data.symbol;
+  const setVerdict = (text, color) => {
+    const v = document.getElementById('saRedFlagsVerdict');
+    if (v) { v.textContent = text; v.style.color = color; }
+  };
+  if (!saGetApiKey()) { body.innerHTML = saRedFlagsHtml({ na: 'Finnhub API key not set' }); setVerdict('n/a', '#64748b'); return; }
+  const fr = await saFetchFilings(sym);
+  if (saCurrentData && saCurrentData.symbol !== sym) return;
+  const a = saRedFlagsAssess(data, fr);
+  const target = document.getElementById('saRedFlagsBody');
+  if (!target) return;
+  target.innerHTML = saRedFlagsHtml(a);
+  setVerdict(a.na ? (a.notApplicable ? 'Not applicable' : 'n/a') : a.verdict, a.na ? '#64748b' : a.color);
+}
+
+// ══ Trend Check ══════════════════════════════════════════════════════
+// Timing context, not a valuation input. Part 1 uses fields already in
+// Finnhub's /stock/metric (free). Part 2 — moving averages, 50/200 cross,
+// RSI, breakouts — needs daily prices, which Finnhub's free plan doesn't
+// provide, so it uses an optional free Twelve Data key (1 request per
+// ticker, cached for the session).
+const TD_BASE = 'https://api.twelvedata.com';
+function tdGetKey() { try { return localStorage.getItem('twelvedata_api_key') || ''; } catch (e) { return ''; } }
+const saCandleCache = {};
+
+function saTrendBase(data) {
+  const price = safeNum(data.price), hi = safeNum(data.high52), lo = safeNum(data.low52);
+  const rows = [];
+  let pos = null;
+  if (price > 0 && hi > 0 && lo > 0 && hi > lo) {
+    pos = Math.max(0, Math.min(100, (price - lo) / (hi - lo) * 100));
+    const offHigh = (price / hi - 1) * 100;
+    const cls = pos >= 70 ? 'pass' : pos >= 30 ? 'hold' : 'fail';
+    rows.push({ cls, name: '52-week range', value: `${pos.toFixed(0)}% of range`,
+      note: `$${lo.toFixed(2)} – $${hi.toFixed(2)} · ${offHigh >= -0.5 ? 'at the high' : offHigh.toFixed(1) + '% from the high'}` });
+  } else rows.push({ cls: '', name: '52-week range', value: 'N/A', note: 'not provided' });
+
+  const fmt = v => (v > 0 ? '+' : '') + v.toFixed(1) + '%';
+  const rets = [['3M', data.ret13w], ['6M', data.ret26w], ['12M', data.ret52w]].filter(r => saRfNum(r[1]));
+  if (rets.length) {
+    const r6 = saRfNum(data.ret26w) ? data.ret26w : rets[rets.length - 1][1];
+    const ups = rets.filter(r => r[1] > 0).length;
+    const cls = ups === rets.length ? 'pass' : ups === 0 ? 'fail' : 'hold';
+    rows.push({ cls, name: 'Price momentum', value: rets.map(r => `${r[0]} ${fmt(r[1])}`).join(' · '), note: '', r6 });
+  } else rows.push({ cls: '', name: 'Price momentum', value: 'N/A', note: 'not provided' });
+
+  if (saRfNum(data.relSP52w)) {
+    const r = data.relSP52w;
+    rows.push({ cls: r >= 0 ? 'pass' : r > -10 ? 'hold' : 'fail', name: 'vs S&P 500 (12M)',
+      value: (r >= 0 ? 'outperformed by ' : 'lagged by ') + Math.abs(r).toFixed(1) + ' pp',
+      note: saRfNum(data.relSP13w) ? `3M: ${fmt(data.relSP13w).replace('%', ' pp')}` : '' });
+  }
+  if (saRfNum(data.vol10d) && data.vol3m > 0) {
+    const x = data.vol10d / data.vol3m;
+    rows.push({ cls: x >= 1.5 ? 'hold' : '', name: 'Volume (10-day vs 3-month avg)', value: x.toFixed(2) + '×',
+      note: x >= 1.5 ? 'unusual activity — check the news' : x <= 0.6 ? 'quiet trading' : 'normal' });
+  }
+  const mom = rows.find(r => r.name === 'Price momentum');
+  const r6 = mom && mom.r6 !== undefined ? mom.r6 : null;
+  let verdict = 'n/a', color = '#64748b';
+  if (pos !== null && r6 !== null) {
+    if (pos >= 70 && r6 > 0) { verdict = 'Strong momentum'; color = '#10b981'; }
+    else if (pos <= 30 && r6 < 0) { verdict = 'Weak / falling'; color = '#ef4444'; }
+    else { verdict = 'Neutral'; color = '#f59e0b'; }
+  }
+  return { rows, verdict, color };
+}
+
+// ── indicators on daily bars (oldest → newest) ──
+function saSma(arr, n, end) {            // simple MA of arr[end-n+1 .. end]
+  if (end < n - 1) return null;
+  let s = 0; for (let i = end - n + 1; i <= end; i++) s += arr[i];
+  return s / n;
+}
+function saRsi(closes, n = 14) {          // Wilder's RSI on the whole series
+  if (closes.length <= n) return null;
+  let g = 0, l = 0;
+  for (let i = 1; i <= n; i++) { const d = closes[i] - closes[i - 1]; if (d > 0) g += d; else l -= d; }
+  g /= n; l /= n;
+  for (let i = n + 1; i < closes.length; i++) {
+    const d = closes[i] - closes[i - 1];
+    g = (g * (n - 1) + Math.max(d, 0)) / n;
+    l = (l * (n - 1) + Math.max(-d, 0)) / n;
+  }
+  if (l === 0) return g === 0 ? 50 : 100;
+  return 100 - 100 / (1 + g / l);
+}
+
+// Pure: bars → trend metrics. livePrice (from the quote) overrides the
+// last close so the comparison uses today's price.
+function saTrendFromBars(bars, livePrice) {
+  const closes = bars.map(b => b.c), vols = bars.map(b => b.v), N = bars.length, last = N - 1;
+  if (N < 60) return { na: `only ${N} trading days of history — too short` };
+  const price = livePrice > 0 ? livePrice : closes[last];
+  const sma50 = saSma(closes, 50, last), sma200 = saSma(closes, 200, last);
+  const out = { price, sma50, sma200, days: N, lastDate: bars[last].t };
+  out.rsi = saRsi(closes, 14);
+  if (sma200 !== null) {
+    const prev = saSma(closes, 200, last - 20);
+    out.sma200Slope = prev ? (sma200 / prev - 1) * 100 : null;
+    out.state = price > sma50 && sma50 > sma200 ? 'Uptrend' : price < sma50 && sma50 < sma200 ? 'Downtrend' : 'Mixed';
+    // Most recent 50/200 cross inside the window.
+    let prevSign = null;
+    for (let i = 199; i <= last; i++) {
+      const s50 = saSma(closes, 50, i), s200 = saSma(closes, 200, i);
+      const sign = s50 > s200 ? 1 : s50 < s200 ? -1 : 0;
+      if (prevSign !== null && sign !== 0 && sign !== prevSign) out.cross = { type: sign > 0 ? 'Golden cross' : 'Death cross', date: bars[i].t, ago: last - i };
+      if (sign !== 0) prevSign = sign;
+    }
+  } else {
+    out.state = sma50 !== null ? (price > sma50 ? 'Above 50-day' : 'Below 50-day') : 'n/a';
+  }
+  // 20-day breakout / breakdown on closes, with volume confirmation.
+  if (N >= 51) {
+    const win = closes.slice(last - 20, last);
+    const hi20 = Math.max(...win), lo20 = Math.min(...win);
+    const avgVol50 = saSma(vols, 50, last - 1);
+    const volX = avgVol50 > 0 ? vols[last] / avgVol50 : null;
+    if (price > hi20) out.breakout = { type: 'up', level: hi20, volX };
+    else if (price < lo20) out.breakout = { type: 'down', level: lo20, volX };
+  }
+  return out;
+}
+
+function saFetchCandles(symbol) {
+  const key = tdGetKey();
+  if (!key) return Promise.resolve({ na: 'no key', noKey: true });
+  const ck = symbol + '|' + key.slice(0, 6);
+  if (saCandleCache[ck]) return saCandleCache[ck];
+  const p = (async () => {
+    let res;
+    try { res = await fetch(`${TD_BASE}/time_series?symbol=${encodeURIComponent(symbol)}&interval=1day&outputsize=400&apikey=${encodeURIComponent(key)}`); }
+    catch (e) { return { na: 'Couldn\'t reach Twelve Data (offline, or the request was blocked by the browser)', transient: true }; }
+    let json = null;
+    try { json = await res.json(); } catch (e) { /* handled below */ }
+    if (!json) return { na: `Twelve Data error (HTTP ${res.status})`, transient: true };
+    if (json.status === 'error' || !Array.isArray(json.values)) {
+      const code = +json.code || res.status;
+      const msg = String(json.message || '').slice(0, 160);
+      if (code === 401 || code === 403) return { na: 'Twelve Data rejected the key' + (msg ? ': ' + msg : ''), badKey: true, transient: true };
+      if (code === 429) return { na: 'Twelve Data limit reached (8 requests/min, 800/day on the free plan) — try again in a minute', transient: true };
+      return { na: msg || `Twelve Data error (code ${code})` };
+    }
+    const bars = json.values.map(v => ({ t: v.datetime, c: parseFloat(v.close), h: parseFloat(v.high), l: parseFloat(v.low), v: parseFloat(v.volume) || 0 }))
+      .filter(b => isFinite(b.c)).reverse();
+    if (!bars.length) return { na: 'No price history returned for this symbol' };
+    return { bars };
+  })();
+  saCandleCache[ck] = p;
+  p.then(r => { if (r.transient && saCandleCache[ck] === p) delete saCandleCache[ck]; });
+  return p;
+}
+
+function saTrendExtHtml(t) {
+  const note = s => `<span style="opacity:.7;font-size:.9em">${s}</span>`;
+  const rows = [];
+  const pct = (a, b) => ((a / b - 1) * 100);
+  const sign = v => (v > 0 ? '+' : '') + v.toFixed(1) + '%';
+  const stCls = t.state === 'Uptrend' ? 'pass' : t.state === 'Downtrend' ? 'fail' : 'hold';
+  rows.push(`<div class="criteria-item ${stCls}"><span>${stCls === 'pass' ? '✓' : stCls === 'fail' ? '✗' : '~'}</span><span>Trend: <strong>${t.state}</strong> ${note(t.sma200 !== null ? '— price vs 50-day vs 200-day average' : '— less than 200 days of history')}</span></div>`);
+  if (t.sma50 !== null) rows.push(`<div class="criteria-item ${t.price > t.sma50 ? 'pass' : 'fail'}"><span>${t.price > t.sma50 ? '✓' : '✗'}</span><span>50-day MA: <strong>$${t.sma50.toFixed(2)}</strong> ${note('— price ' + sign(pct(t.price, t.sma50)))}</span></div>`);
+  if (t.sma200 !== null) {
+    const slope = t.sma200Slope !== null && t.sma200Slope !== undefined ? ` · 200-day line ${t.sma200Slope >= 0 ? 'rising' : 'falling'} (${sign(t.sma200Slope)} in 20 days)` : '';
+    rows.push(`<div class="criteria-item ${t.price > t.sma200 ? 'pass' : 'fail'}"><span>${t.price > t.sma200 ? '✓' : '✗'}</span><span>200-day MA: <strong>$${t.sma200.toFixed(2)}</strong> ${note('— price ' + sign(pct(t.price, t.sma200)) + slope)}</span></div>`);
+  }
+  if (t.cross) {
+    const good = t.cross.type === 'Golden cross';
+    rows.push(`<div class="criteria-item ${good ? 'pass' : 'fail'}"><span>${good ? '✓' : '✗'}</span><span>Last 50/200 cross: <strong>${t.cross.type}</strong> ${note(`— ${escapeHtml(String(t.cross.date))}, ${t.cross.ago} trading days ago`)}</span></div>`);
+  } else if (t.sma200 !== null) {
+    rows.push(`<div class="criteria-item"><span>·</span><span>Last 50/200 cross: <strong>none</strong> ${note(`in the last ${t.days - 199} trading days`)}</span></div>`);
+  }
+  if (t.rsi !== null) {
+    const r = t.rsi, cls = r >= 70 || r <= 30 ? 'hold' : '';
+    const lbl = r >= 70 ? 'overbought' : r <= 30 ? 'oversold' : r >= 50 ? 'neutral-bullish' : 'neutral-bearish';
+    rows.push(`<div class="criteria-item ${cls}"><span>${cls ? '~' : '·'}</span><span>RSI (14): <strong>${r.toFixed(0)}</strong> · ${lbl} ${note('— >70 overbought · <30 oversold')}</span></div>`);
+  }
+  if (t.breakout) {
+    const up = t.breakout.type === 'up';
+    const vol = t.breakout.volX !== null ? `volume ${t.breakout.volX.toFixed(1)}× the 50-day average${t.breakout.volX >= 1.5 ? ' — confirmed' : ' — weak confirmation'}` : '';
+    rows.push(`<div class="criteria-item ${up ? 'pass' : 'fail'}"><span>${up ? '↑' : '↓'}</span><span>${up ? '20-day breakout' : '20-day breakdown'}: <strong>${up ? 'above' : 'below'} $${t.breakout.level.toFixed(2)}</strong> ${note('— ' + vol)}</span></div>`);
+  }
+  rows.push(`<div style="font-size:.74rem;color:#64748b;margin-top:2px">Daily prices: Twelve Data · ${t.days} sessions to ${escapeHtml(String(t.lastDate))} · <a href="#" onclick="saTdForget();return false" style="color:#64748b">change key</a></div>`);
+  return rows.join('');
+}
+
+function saTdKeyFormHtml(msg) {
+  return `<div class="criteria-item" style="flex-direction:column;align-items:stretch;gap:8px">
+    <div style="font-size:.85rem;line-height:1.5">${msg ? `<div style="color:#b91c1c;margin-bottom:4px">${escapeHtml(msg)}</div>` : ''}
+      <strong>Moving averages, 50/200 cross, RSI and breakouts</strong> need daily prices, which Finnhub's free plan doesn't include.
+      Add a free <a href="https://twelvedata.com/register" target="_blank" rel="noopener" style="color:#2563eb">Twelve Data</a> key (free plan: 800 requests/day — this uses 1 per ticker). It is stored only in this browser.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <input id="saTdKeyInput" type="password" autocomplete="off" placeholder="Twelve Data API key" style="flex:1;min-width:160px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:.85rem;background:#fff;color:#0f172a">
+      <button onclick="saTdSaveKey()" style="padding:8px 14px;border:none;border-radius:6px;background:#2563eb;color:#fff;font-weight:600;cursor:pointer">Save</button>
+    </div></div>`;
+}
+
+function saTdSaveKey() {
+  const inp = document.getElementById('saTdKeyInput');
+  const key = inp ? inp.value.trim() : '';
+  if (!key) { if (inp) inp.style.borderColor = '#ef4444'; return; }
+  try { localStorage.setItem('twelvedata_api_key', key); } catch (e) { /* private mode */ }
+  if (saCurrentData) saLoadTrendExt(saCurrentData);
+}
+function saTdForget() {
+  try { localStorage.removeItem('twelvedata_api_key'); } catch (e) { /* ignore */ }
+  const el = document.getElementById('saTrendExt');
+  if (el) el.innerHTML = saTdKeyFormHtml('');
+}
+
+async function saLoadTrendExt(data) {
+  const el = document.getElementById('saTrendExt');
+  if (!el) return;
+  if (!tdGetKey()) { el.innerHTML = saTdKeyFormHtml(''); return; }
+  el.innerHTML = '<div class="criteria-item"><span>⏳</span><span>Loading daily prices…</span></div>';
+  const sym = data.symbol;
+  const r = await saFetchCandles(sym);
+  if (saCurrentData && saCurrentData.symbol !== sym) return;
+  const target = document.getElementById('saTrendExt');
+  if (!target) return;
+  if (r.badKey) { target.innerHTML = saTdKeyFormHtml(r.na); return; }
+  if (r.na) { target.innerHTML = `<div class="criteria-item"><span>–</span><span><strong>n/a</strong> — ${escapeHtml(r.na)} · <a href="#" onclick="saTdForget();return false" style="color:#64748b">change key</a></span></div>`; return; }
+  const t = saTrendFromBars(r.bars, safeNum(data.price));
+  if (t.na) { target.innerHTML = `<div class="criteria-item"><span>–</span><span><strong>n/a</strong> — ${escapeHtml(t.na)}</span></div>`; return; }
+  target.innerHTML = saTrendExtHtml(t);
+  // The 50/200 picture is the more reliable trend read → use it for the header.
+  const v = document.getElementById('saTrendVerdict');
+  if (v && t.sma200 !== null) {
+    v.textContent = t.state;
+    v.style.color = t.state === 'Uptrend' ? '#10b981' : t.state === 'Downtrend' ? '#ef4444' : '#f59e0b';
+  }
+}
+
+function saTrendSectionHtml(data) {
+  const b = saTrendBase(data);
+  const rows = b.rows.map(r => `<div class="criteria-item ${r.cls}"><span>${r.cls === 'pass' ? '✓' : r.cls === 'fail' ? '✗' : r.cls === 'hold' ? '~' : '·'}</span><span>${r.name}: <strong>${r.value}</strong>${r.note ? ` <span style="opacity:.7;font-size:.9em">— ${r.note}</span>` : ''}</span></div>`).join('');
+  return `<div class="criteria-section">
+      <h3 class="section-title" style="display:flex;align-items:center;justify-content:space-between">
+        <span>📊 Trend Check</span>
+        <span id="saTrendVerdict" style="font-size:.78rem;font-weight:600;color:${b.color}">${b.verdict}</span>
+      </h3>
+      ${rows}
+      <div id="saTrendExt"></div>
+      <div style="font-size:.78rem;color:#475569;line-height:1.5;margin-top:4px">Timing context only — it says how the market is treating the stock now, not what it's worth. A cheap stock in a downtrend can stay cheap for a long time.</div>
+    </div>`;
 }
 
 function saRenderAnalysis(data) {
@@ -4295,7 +4797,17 @@ function saRenderAnalysis(data) {
         <span id="saBurryVerdict" style="font-size:.78rem;font-weight:600;color:#64748b">loading…</span>
       </h3>
       <div id="saBurryBody"><div class="criteria-item"><span>⏳</span><span>Reading stock-based compensation from the latest 10-K…</span></div></div>
-    </div>`;
+    </div>
+
+    <div class="criteria-section">
+      <h3 class="section-title" style="display:flex;align-items:center;justify-content:space-between">
+        <span>🚩 Red Flags</span>
+        <span id="saRedFlagsVerdict" style="font-size:.78rem;font-weight:600;color:#64748b">loading…</span>
+      </h3>
+      <div id="saRedFlagsBody"><div class="criteria-item"><span>⏳</span><span>Computing Altman Z, Piotroski F and Beneish M from the annual filings…</span></div></div>
+    </div>
+
+    ${saTrendSectionHtml(data)}`;
 
   saLoadBurryCheck(data).catch(e => {
     console.error('[saLoadBurryCheck]', e);
@@ -4303,6 +4815,18 @@ function saRenderAnalysis(data) {
     if (b) b.innerHTML = saBurryHtml({ na: 'Unexpected error reading the filing' });
     const v = document.getElementById('saBurryVerdict');
     if (v) { v.textContent = 'n/a'; v.style.color = '#64748b'; }
+  });
+  saLoadRedFlags(data).catch(e => {
+    console.error('[saLoadRedFlags]', e);
+    const b = document.getElementById('saRedFlagsBody');
+    if (b) b.innerHTML = saRedFlagsHtml({ na: 'Unexpected error reading the filings' });
+    const v = document.getElementById('saRedFlagsVerdict');
+    if (v) { v.textContent = 'n/a'; v.style.color = '#64748b'; }
+  });
+  saLoadTrendExt(data).catch(e => {
+    console.error('[saLoadTrendExt]', e);
+    const b = document.getElementById('saTrendExt');
+    if (b) b.innerHTML = '<div class="criteria-item"><span>–</span><span><strong>n/a</strong> — unexpected error loading daily prices</span></div>';
   });
 
   }
@@ -4849,7 +5373,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Service Worker registration ───────────────────────────────
 // Bump APP_VERSION AND CACHE_NAME in sw.js together on every deploy.
 // The version check below clears old caches immediately on load.
-const APP_VERSION = '2.6';
+const APP_VERSION = '2.7';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
