@@ -3185,18 +3185,72 @@ async function saLoadAnalyst(data, val) {
 // Used when no valuation method applies (pre-profit / pre-revenue
 // companies), where survival without new financing is the key question.
 // FCF includes capex, so a company building a plant shows its full burn.
-function saCashRunway(data) {
+// `filing` (optional) = cash / FCF read from the latest 10-K, used for
+// whatever Finnhub's metrics don't provide. Sources are labelled.
+function saCashRunway(data, filing) {
   const shares = safeNum(data.sharesOutstanding);
   const cashPS = (data.cashPerShare === null || data.cashPerShare === undefined) ? null : safeNum(data.cashPerShare);
   const fcfPS  = safeNum(data.freeCashFlowPerShare);
-  if (!(shares > 0) || cashPS === null || cashPS <= 0) return { na: 'cash not reported by Finnhub' };
-  const cash = cashPS * shares;
-  if (fcfPS === 0) return { na: 'free cash flow not reported by Finnhub', cash };
-  const fcf = fcfPS * shares;
-  if (fcf > 0) return { cash, fcf, selfFunding: true, cls: 'pass' };
+  const f = filing || {};
+  let cash = null, cashSrc = '', fcf = null, fcfSrc = '';
+  if (shares > 0 && cashPS !== null && cashPS > 0) { cash = cashPS * shares; cashSrc = 'latest quarter'; }
+  else if (f.cash > 0) { cash = f.cash; cashSrc = f.label; }
+  if (shares > 0 && fcfPS !== 0) { fcf = fcfPS * shares; fcfSrc = 'TTM'; }
+  else if (f.fcf !== null && f.fcf !== undefined && isFinite(f.fcf)) { fcf = f.fcf; fcfSrc = f.label; }
+  const missing = [cash === null ? 'cash' : '', fcf === null ? 'free cash flow' : ''].filter(Boolean);
+  if (missing.length) return { na: missing.join(' and ') + ' not reported by Finnhub', needFiling: !filing, cash, fcf };
+  const out = { cash, cashSrc, fcf, fcfSrc, capexMissing: !!(f.capexMissing && fcfSrc === f.label) };
+  if (fcf > 0) return Object.assign(out, { selfFunding: true, cls: 'pass' });
   const months = cash / (-fcf) * 12;
-  const cls = months >= 24 ? 'pass' : months >= 12 ? 'hold' : 'fail';
-  return { cash, burn: -fcf, months, cls };
+  return Object.assign(out, { burn: -fcf, months, cls: months >= 24 ? 'pass' : months >= 12 ? 'hold' : 'fail' });
+}
+
+function saRunwayHtml(rw) {
+  const fmtB = v => saFormatBigNumber(v);
+  if (rw.loading) return 'Cash runway: ⏳ reading cash flow from the latest 10-K…';
+  if (rw.na) return `Cash runway: n/a — ${escapeHtml(rw.na)}.`;
+  const src = (rw.cashSrc === rw.fcfSrc ? `both from ${rw.fcfSrc}` : `cash: ${rw.cashSrc}, FCF: ${rw.fcfSrc}`);
+  const capexNote = rw.capexMissing ? ' · capex not tagged in the filing — operating cash flow used, so the burn is understated' : '';
+  if (rw.selfFunding) return `Free cash flow is positive (${fmtB(rw.fcf)}/yr) — the company funds itself; cash ${fmtB(rw.cash)}.<br><span style="opacity:.85">Sources — ${escapeHtml(src)}${capexNote}.</span>`;
+  const yrs = rw.months >= 24 ? ` (~${(rw.months / 12).toFixed(1)} yrs)` : '';
+  const color = rw.cls === 'pass' ? '#bbf7d0' : rw.cls === 'hold' ? '#fde68a' : '#fecaca';
+  const verdict = rw.cls === 'pass' ? 'comfortable — no near-term need to raise money'
+    : rw.cls === 'hold' ? 'expect new financing (share issuance or debt) within 1–2 years'
+    : 'new financing is likely soon — high risk of dilution';
+  const stale = rw.fcfSrc && rw.fcfSrc !== 'TTM' ? ' The burn comes from the last annual report — for a company that is ramping up spending, today\'s burn is likely higher and the real runway shorter.' : '';
+  return `<strong style="font-size:1.25em;color:${color}">${rw.months.toFixed(0)} months${yrs}</strong> of cash runway — ${verdict}.<br>
+    <span style="opacity:.85">Cash ${fmtB(rw.cash)} ÷ FCF burn ${fmtB(rw.burn)}/yr${rw.capexMissing ? '' : ' (incl. capex)'}. Sources — ${escapeHtml(src)}${capexNote}. Assumes the burn stays at that rate.${stale}</span>`;
+}
+
+// Cash and FCF from the latest annual filing (same request the Burry and
+// Red Flags blocks use). FCF = operating cash flow − capex.
+function saRunwayFromFiling(filing) {
+  const x = saExtractSbc(filing);   // ocf / capex extraction is shared
+  const bs = saReportItems(((filing && filing.report) || {}).bs);
+  const usd = it => it && isFinite(parseFloat(it.value)) && (!it.unit || /usd/i.test(it.unit));
+  const pick = names => { for (const n of names) { const re = new RegExp('(^|[_:])' + n + '$'); const h = bs.find(it => usd(it) && re.test(String(it.concept || ''))); if (h) return parseFloat(h.value); } return null; };
+  let cash = pick(['CashAndCashEquivalentsAtCarryingValue', 'CashAndCashEquivalents', 'Cash', 'CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents']);
+  const sti = pick(['ShortTermInvestments', 'MarketableSecuritiesCurrent', 'AvailableForSaleSecuritiesDebtSecuritiesCurrent']);
+  if (cash !== null && sti !== null && sti > 0) cash += sti;
+  const fcf = x.ocf !== null ? x.ocf - (x.capex || 0) : null;
+  const label = `${filing.form || '10-K'} FY${filing.year || ''}`.trim();
+  return { cash, fcf, capexMissing: x.ocf !== null && x.capex === null, label };
+}
+
+async function saLoadRunwayFromFilings(data) {
+  const sym = data.symbol;
+  const set = html => { const el = document.getElementById('saRunway'); if (el) el.innerHTML = html; };
+  const fr = await saFetchFilings(sym);
+  if (saCurrentData && saCurrentData.symbol !== sym) return;
+  if (fr.na) { set(saRunwayHtml({ na: saCashRunway(data, {}).na + ' · 10-K: ' + fr.na })); return; }
+  let best = null;
+  for (const f of fr.filings.slice(0, 2)) {          // latest filing that has operating cash flow
+    const r = saRunwayFromFiling(f);
+    if (r.fcf !== null) { best = r; break; }
+  }
+  const rw = saCashRunway(data, best || {});
+  if (rw.na && !best) rw.na += ' · operating cash flow not found in the latest 10-K either';
+  set(saRunwayHtml(rw));
 }
 
 function saRenderValuation(data) {
@@ -3206,26 +3260,15 @@ function saRenderValuation(data) {
   // instead of $0.00 / SELL, plus the cash runway that matters here.
   if (!val.validVals.length) {
     const rw = saCashRunway(data);
-    const fmtB = v => saFormatBigNumber(v);
-    let rwHtml;
-    if (rw.na) rwHtml = `Cash runway: n/a — ${rw.na}.`;
-    else if (rw.selfFunding) rwHtml = `Free cash flow is positive (${fmtB(rw.fcf)} TTM) — the company funds itself; cash ${fmtB(rw.cash)}.`;
-    else {
-      const yrs = rw.months >= 24 ? ` (~${(rw.months / 12).toFixed(1)} yrs)` : '';
-      const color = rw.cls === 'pass' ? '#bbf7d0' : rw.cls === 'hold' ? '#fde68a' : '#fecaca';
-      const verdict = rw.cls === 'pass' ? 'comfortable — no near-term need to raise money'
-        : rw.cls === 'hold' ? 'expect new financing (share issuance or debt) within 1–2 years'
-        : 'new financing is likely soon — high risk of dilution';
-      rwHtml = `<strong style="font-size:1.25em;color:${color}">${rw.months.toFixed(0)} months${yrs}</strong> of cash runway — ${verdict}.<br>
-        <span style="opacity:.85">Cash ${fmtB(rw.cash)} ÷ FCF burn ${fmtB(rw.burn)}/yr (TTM, incl. capex). Assumes the burn stays at today's rate.</span>`;
-    }
+    const needFiling = rw.na && rw.needFiling && !!saGetApiKey();
+    const rwHtml = saRunwayHtml(needFiling ? { loading: true } : rw);
     document.getElementById('saValuation').innerHTML = `
       <div class="valuation-card unrated">
         <div>Fair Value</div>
         <div class="fair-value" style="font-size:1.6em">Not rated</div>
         <div style="margin-top:8px;font-size:.9em;line-height:1.55;opacity:.95">None of the 8 methods applies — the company has no positive earnings, cash flow, dividends or meaningful revenue yet.
           Pre-profit companies are valued on their project or asset value (NAV) and on how long their cash lasts, which aren't available from Finnhub.</div>
-        <div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.25);font-size:.85em;line-height:1.6">${rwHtml}</div>
+        <div id="saRunway" style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.25);font-size:.85em;line-height:1.6">${rwHtml}</div>
       </div>
       <div id="saAnalystCard"><div style="margin-top:14px;padding:12px 14px;background:#eef2f7;border:1px solid rgba(15,23,42,.12);border-radius:10px;font-size:.82em;color:#475569">👥 Loading analyst consensus…</div></div>
       <div class="valuation-methods">
@@ -3240,6 +3283,10 @@ function saRenderValuation(data) {
         <div class="method-row"><span>8. Price/Sales</span>${saMethodCell(val,'psVal','ps')}</div>
       </div>`;
     saLoadAnalyst(data, val).catch(e => console.error('[saLoadAnalyst]', e));
+    if (needFiling) saLoadRunwayFromFilings(data).catch(e => {
+      console.error('[saLoadRunwayFromFilings]', e);
+      const el = document.getElementById('saRunway'); if (el) el.innerHTML = saRunwayHtml({ na: rw.na });
+    });
     return;
   }
   let cardClass = 'valuation-card', rec = '🔴 SELL';
@@ -5436,7 +5483,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Service Worker registration ───────────────────────────────
 // Bump APP_VERSION AND CACHE_NAME in sw.js together on every deploy.
 // The version check below clears old caches immediately on load.
-const APP_VERSION = '2.7.1';
+const APP_VERSION = '2.7.2';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
