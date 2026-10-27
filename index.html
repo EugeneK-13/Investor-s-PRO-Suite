@@ -3185,41 +3185,94 @@ async function saLoadAnalyst(data, val) {
 // Used when no valuation method applies (pre-profit / pre-revenue
 // companies), where survival without new financing is the key question.
 // FCF includes capex, so a company building a plant shows its full burn.
-// `filing` (optional) = cash / FCF read from the latest 10-K, used for
-// whatever Finnhub's metrics don't provide. Sources are labelled.
-function saCashRunway(data, filing) {
+// Sources, freshest first:
+//   1. Yahoo quarterly cash flow via the user's own Google Apps Script
+//      (optional; the same /exec web app as PORTFOLIO.TERM, v18+, ?fin=1)
+//   2. Finnhub metrics (cash per share, FCF TTM)
+//   3. the latest 10-K from Finnhub financials-as-reported
+// Conservative: when the latest quarter annualised burns faster than the
+// trailing 12 months, the faster burn is used.
+function gasGetUrl() { try { return localStorage.getItem('svpro_gas_url') || ''; } catch (e) { return ''; } }
+const saYahooFinCache = {};
+
+function saFetchYahooFin(symbol) {
+  const base = gasGetUrl();
+  if (!base) return Promise.resolve({ na: 'Apps Script not connected', noUrl: true });
+  const ck = symbol + '|' + base;
+  if (saYahooFinCache[ck]) return saYahooFinCache[ck];
+  const p = (async () => {
+    let json = null;
+    try {
+      const res = await fetch(base + (base.indexOf('?') >= 0 ? '&' : '?') + 'fin=1&symbols=' + encodeURIComponent(symbol));
+      json = await res.json();
+    } catch (e) { return { na: 'Apps Script didn\'t respond (offline, or the URL is wrong)', transient: true }; }
+    if (!json || !json.fin) {
+      const v = json && json.version;
+      return { na: v && v < 18 ? `your Apps Script is v${v} — deploy the v18 update to enable fin=1` : 'Apps Script returned no financial data (fin=1 not supported?)' };
+    }
+    const r = json.fin[symbol];
+    if (!r) return { na: 'Apps Script returned nothing for this ticker' };
+    if (r.error) return { na: 'Yahoo: ' + String(r.error).slice(0, 140) };
+    return { fin: r };
+  })();
+  saYahooFinCache[ck] = p;
+  p.then(r => { if (r.transient && saYahooFinCache[ck] === p) delete saYahooFinCache[ck]; });
+  return p;
+}
+
+// Pure. src = { yahoo: <fin object from Apps Script>, filing: <saRunwayFromFiling()> }
+function saCashRunway(data, src) {
+  src = src || {};
   const shares = safeNum(data.sharesOutstanding);
   const cashPS = (data.cashPerShare === null || data.cashPerShare === undefined) ? null : safeNum(data.cashPerShare);
   const fcfPS  = safeNum(data.freeCashFlowPerShare);
-  const f = filing || {};
-  let cash = null, cashSrc = '', fcf = null, fcfSrc = '';
-  if (shares > 0 && cashPS !== null && cashPS > 0) { cash = cashPS * shares; cashSrc = 'latest quarter'; }
-  else if (f.cash > 0) { cash = f.cash; cashSrc = f.label; }
-  if (shares > 0 && fcfPS !== 0) { fcf = fcfPS * shares; fcfSrc = 'TTM'; }
-  else if (f.fcf !== null && f.fcf !== undefined && isFinite(f.fcf)) { fcf = f.fcf; fcfSrc = f.label; }
+  const y = src.yahoo || null, f = src.filing || null;
+  const num = v => v !== null && v !== undefined && isFinite(v);
+  let cash = null, cashSrc = '', fcf = null, fcfSrc = '', capexMissing = false;
+  // cash
+  if (y && num(y.cash) && y.cash > 0) { cash = y.cash; cashSrc = `Yahoo, quarter to ${y.cashDate}`; }
+  else if (shares > 0 && cashPS !== null && cashPS > 0) { cash = cashPS * shares; cashSrc = 'Finnhub, latest quarter'; }
+  else if (f && f.cash > 0) { cash = f.cash; cashSrc = f.label; }
+  // trailing-12-month FCF
+  if (y && y.ttm && num(y.ttm.fcf)) { fcf = y.ttm.fcf; fcfSrc = `Yahoo, 12 months to ${y.ttm.date}`; capexMissing = !!y.ttm.noCapex; }
+  else if (shares > 0 && fcfPS !== 0) { fcf = fcfPS * shares; fcfSrc = 'Finnhub, TTM'; }
+  else if (f && num(f.fcf)) { fcf = f.fcf; fcfSrc = f.label; capexMissing = !!f.capexMissing; }
+  // latest quarter, annualised (Yahoo only)
+  const q0 = y && Array.isArray(y.quarters) ? y.quarters.find(q => num(q.fcf)) : null;
+  const recent = q0 ? { fcf: q0.fcf * 4, date: q0.date, noCapex: !!q0.noCapex } : null;
+  if (fcf === null && recent) { fcf = recent.fcf; fcfSrc = `Yahoo, quarter to ${recent.date} ×4`; capexMissing = recent.noCapex; }
+
   const missing = [cash === null ? 'cash' : '', fcf === null ? 'free cash flow' : ''].filter(Boolean);
-  if (missing.length) return { na: missing.join(' and ') + ' not reported by Finnhub', needFiling: !filing, cash, fcf };
-  const out = { cash, cashSrc, fcf, fcfSrc, capexMissing: !!(f.capexMissing && fcfSrc === f.label) };
-  if (fcf > 0) return Object.assign(out, { selfFunding: true, cls: 'pass' });
-  const months = cash / (-fcf) * 12;
-  return Object.assign(out, { burn: -fcf, months, cls: months >= 24 ? 'pass' : months >= 12 ? 'hold' : 'fail' });
+  if (missing.length) return { na: missing.join(' and ') + ' not available', cash, fcf };
+  const out = { cash, cashSrc, fcf, fcfSrc, capexMissing, recent };
+  const burnTtm = fcf < 0 ? -fcf : 0;
+  const burnRecent = recent && recent.fcf < 0 ? -recent.fcf : 0;
+  if (burnTtm === 0 && burnRecent === 0) return Object.assign(out, { selfFunding: true, cls: 'pass' });
+  out.usedRecent = burnRecent > burnTtm && recent && fcfSrc.indexOf('×4') < 0;
+  out.burn = Math.max(burnTtm, burnRecent);
+  if (out.usedRecent && recent.noCapex) out.capexMissing = true;
+  out.months = cash / out.burn * 12;
+  out.cls = out.months >= 24 ? 'pass' : out.months >= 12 ? 'hold' : 'fail';
+  return out;
 }
 
 function saRunwayHtml(rw) {
   const fmtB = v => saFormatBigNumber(v);
-  if (rw.loading) return 'Cash runway: ⏳ reading cash flow from the latest 10-K…';
+  const sgn = v => (v < 0 ? '−' + fmtB(-v) : fmtB(v));
+  if (rw.loading) return 'Cash runway: ⏳ loading cash flow…';
   if (rw.na) return `Cash runway: n/a — ${escapeHtml(rw.na)}.`;
-  const src = (rw.cashSrc === rw.fcfSrc ? `both from ${rw.fcfSrc}` : `cash: ${rw.cashSrc}, FCF: ${rw.fcfSrc}`);
-  const capexNote = rw.capexMissing ? ' · capex not tagged in the filing — operating cash flow used, so the burn is understated' : '';
-  if (rw.selfFunding) return `Free cash flow is positive (${fmtB(rw.fcf)}/yr) — the company funds itself; cash ${fmtB(rw.cash)}.<br><span style="opacity:.85">Sources — ${escapeHtml(src)}${capexNote}.</span>`;
+  const capexNote = rw.capexMissing ? ' Capex isn\'t reported for part of the period — operating cash flow was used there, so the burn is understated.' : '';
+  const srcLine = `Cash: ${escapeHtml(rw.cashSrc)}. FCF: ${escapeHtml(rw.fcfSrc)} ${sgn(rw.fcf)}${rw.recent && rw.fcfSrc.indexOf('×4') < 0 ? ` · latest quarter (${escapeHtml(rw.recent.date)}) ×4 ${sgn(rw.recent.fcf)}/yr` : ''}.`;
+  if (rw.selfFunding) return `Free cash flow is positive — the company funds itself; cash ${fmtB(rw.cash)}.<br><span style="opacity:.85">${srcLine}${capexNote}</span>`;
   const yrs = rw.months >= 24 ? ` (~${(rw.months / 12).toFixed(1)} yrs)` : '';
   const color = rw.cls === 'pass' ? '#bbf7d0' : rw.cls === 'hold' ? '#fde68a' : '#fecaca';
   const verdict = rw.cls === 'pass' ? 'comfortable — no near-term need to raise money'
     : rw.cls === 'hold' ? 'expect new financing (share issuance or debt) within 1–2 years'
     : 'new financing is likely soon — high risk of dilution';
-  const stale = rw.fcfSrc && rw.fcfSrc !== 'TTM' ? ' The burn comes from the last annual report — for a company that is ramping up spending, today\'s burn is likely higher and the real runway shorter.' : '';
+  const basis = rw.usedRecent ? 'the latest quarter burns faster than the 12-month average, so its annualised rate is used (conservative)' : '';
+  const stale = /10-K|10-Q|20-F/.test(rw.fcfSrc) ? ' The burn comes from the last annual report — for a company that is ramping up spending, today\'s burn is likely higher and the real runway shorter.' : '';
   return `<strong style="font-size:1.25em;color:${color}">${rw.months.toFixed(0)} months${yrs}</strong> of cash runway — ${verdict}.<br>
-    <span style="opacity:.85">Cash ${fmtB(rw.cash)} ÷ FCF burn ${fmtB(rw.burn)}/yr${rw.capexMissing ? '' : ' (incl. capex)'}. Sources — ${escapeHtml(src)}${capexNote}. Assumes the burn stays at that rate.${stale}</span>`;
+    <span style="opacity:.85">Cash ${fmtB(rw.cash)} ÷ burn ${fmtB(rw.burn)}/yr${rw.capexMissing ? '' : ' (incl. capex)'}${basis ? ' — ' + basis : ''}. ${srcLine} Assumes the burn stays at that rate.${stale}${capexNote}</span>`;
 }
 
 // Cash and FCF from the latest annual filing (same request the Burry and
@@ -3237,20 +3290,54 @@ function saRunwayFromFiling(filing) {
   return { cash, fcf, capexMissing: x.ocf !== null && x.capex === null, label };
 }
 
-async function saLoadRunwayFromFilings(data) {
-  const sym = data.symbol;
-  const set = html => { const el = document.getElementById('saRunway'); if (el) el.innerHTML = html; };
-  const fr = await saFetchFilings(sym);
-  if (saCurrentData && saCurrentData.symbol !== sym) return;
-  if (fr.na) { set(saRunwayHtml({ na: saCashRunway(data, {}).na + ' · 10-K: ' + fr.na })); return; }
-  let best = null;
-  for (const f of fr.filings.slice(0, 2)) {          // latest filing that has operating cash flow
-    const r = saRunwayFromFiling(f);
-    if (r.fcf !== null) { best = r; break; }
+function saGasFormHtml() {
+  const url = gasGetUrl();
+  return `<details style="margin-top:8px;font-size:.78em;opacity:.9;text-align:left">
+    <summary style="cursor:pointer">⚙ Quarterly data via your Apps Script: ${url ? 'connected ✓' : 'not connected'}</summary>
+    <div style="margin-top:6px;line-height:1.5">Paste the /exec URL of your Google Apps Script (the PORTFOLIO.TERM web app, v18+). It reads Yahoo's quarterly cash flow, which is fresher than Finnhub's TTM and the annual 10-K. Stored only in this browser.</div>
+    <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+      <input id="saGasUrlInput" type="url" value="${escapeHtml(url)}" placeholder="https://script.google.com/macros/s/…/exec" style="flex:1;min-width:180px;padding:6px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.95);color:#0f172a;font-size:.95em">
+      <button onclick="saGasSaveUrl()" style="padding:6px 12px;border:none;border-radius:6px;background:#2563eb;color:#fff;font-weight:600;cursor:pointer">Save</button>
+      ${url ? '<button onclick="saGasSaveUrl(true)" style="padding:6px 12px;border:none;border-radius:6px;background:rgba(255,255,255,.2);color:#fff;cursor:pointer">Remove</button>' : ''}
+    </div></details>`;
+}
+
+function saGasSaveUrl(remove) {
+  const inp = document.getElementById('saGasUrlInput');
+  const url = remove ? '' : (inp ? inp.value.trim() : '');
+  if (!remove && !/^https:\/\/script\.google(usercontent)?\.com\/.+/.test(url)) {
+    if (inp) { inp.style.borderColor = '#ef4444'; inp.value = ''; inp.placeholder = 'Must be a https://script.google.com/…/exec URL'; }
+    return;
   }
-  const rw = saCashRunway(data, best || {});
-  if (rw.na && !best) rw.na += ' · operating cash flow not found in the latest 10-K either';
-  set(saRunwayHtml(rw));
+  try { if (remove) localStorage.removeItem('svpro_gas_url'); else localStorage.setItem('svpro_gas_url', url); } catch (e) { /* private mode */ }
+  if (saCurrentData) { saLoadRunway(saCurrentData); saLoadTrendExt(saCurrentData).catch(() => {}); }
+}
+
+async function saLoadRunway(data) {
+  const sym = data.symbol;
+  const set = html => { const el = document.getElementById('saRunway'); if (el) el.innerHTML = html + saGasFormHtml(); };
+  set(saRunwayHtml({ loading: true }));
+  const src = {}, notes = [];
+  if (gasGetUrl()) {
+    const y = await saFetchYahooFin(sym);
+    if (y.fin) src.yahoo = y.fin; else notes.push('Yahoo: ' + y.na.replace(/^Yahoo: /, ''));
+  }
+  let rw = saCashRunway(data, src);
+  if (rw.na && saGetApiKey()) {
+    const fr = await saFetchFilings(sym);
+    if (fr.na) notes.push('10-K: ' + fr.na);
+    else {
+      let best = null;
+      for (const f of fr.filings.slice(0, 2)) { const r = saRunwayFromFiling(f); if (r.fcf !== null) { best = r; break; } }
+      if (best) { src.filing = best; rw = saCashRunway(data, src); }
+      else notes.push('no operating cash flow in the latest 10-K');
+    }
+  }
+  if (saCurrentData && saCurrentData.symbol !== sym) return;
+  if (rw.na && notes.length) rw.na += ' (' + notes.join('; ') + ')';
+  let html = saRunwayHtml(rw);
+  if (!rw.na && notes.length && !src.yahoo && gasGetUrl()) html += `<div style="font-size:.85em;opacity:.8;margin-top:4px">⚠ ${escapeHtml(notes[0])} — fell back to other sources.</div>`;
+  set(html);
 }
 
 function saRenderValuation(data) {
@@ -3260,8 +3347,8 @@ function saRenderValuation(data) {
   // instead of $0.00 / SELL, plus the cash runway that matters here.
   if (!val.validVals.length) {
     const rw = saCashRunway(data);
-    const needFiling = rw.na && rw.needFiling && !!saGetApiKey();
-    const rwHtml = saRunwayHtml(needFiling ? { loading: true } : rw);
+    const needAsync = !!gasGetUrl() || (!!rw.na && !!saGetApiKey());
+    const rwHtml = saRunwayHtml(needAsync ? { loading: true } : rw) + saGasFormHtml();
     document.getElementById('saValuation').innerHTML = `
       <div class="valuation-card unrated">
         <div>Fair Value</div>
@@ -3283,9 +3370,9 @@ function saRenderValuation(data) {
         <div class="method-row"><span>8. Price/Sales</span>${saMethodCell(val,'psVal','ps')}</div>
       </div>`;
     saLoadAnalyst(data, val).catch(e => console.error('[saLoadAnalyst]', e));
-    if (needFiling) saLoadRunwayFromFilings(data).catch(e => {
-      console.error('[saLoadRunwayFromFilings]', e);
-      const el = document.getElementById('saRunway'); if (el) el.innerHTML = saRunwayHtml({ na: rw.na });
+    if (needAsync) saLoadRunway(data).catch(e => {
+      console.error('[saLoadRunway]', e);
+      const el = document.getElementById('saRunway'); if (el) el.innerHTML = saRunwayHtml({ na: rw.na || 'unexpected error' }) + saGasFormHtml();
     });
     return;
   }
@@ -4709,7 +4796,7 @@ function saFetchCandles(symbol) {
   return p;
 }
 
-function saTrendExtHtml(t) {
+function saTrendExtHtml(t, src) {
   const note = s => `<span style="opacity:.7;font-size:.9em">${s}</span>`;
   const rows = [];
   const pct = (a, b) => ((a / b - 1) * 100);
@@ -4734,24 +4821,87 @@ function saTrendExtHtml(t) {
   }
   if (t.breakout) {
     const up = t.breakout.type === 'up';
-    const vol = t.breakout.volX !== null ? `volume ${t.breakout.volX.toFixed(1)}× the 50-day average${t.breakout.volX >= 1.5 ? ' — confirmed' : ' — weak confirmation'}` : '';
+    const vol = (t.breakout.volX !== null && t.breakout.volX !== undefined) ? `volume ${t.breakout.volX.toFixed(1)}× the 50-day average${t.breakout.volX >= 1.5 ? ' — confirmed' : ' — weak confirmation'}` : 'volume not available';
     rows.push(`<div class="criteria-item ${up ? 'pass' : 'fail'}"><span>${up ? '↑' : '↓'}</span><span>${up ? '20-day breakout' : '20-day breakdown'}: <strong>${up ? 'above' : 'below'} $${t.breakout.level.toFixed(2)}</strong> ${note('— ' + vol)}</span></div>`);
   }
-  rows.push(`<div style="font-size:.74rem;color:#64748b;margin-top:2px">Daily prices: Twelve Data · ${t.days} sessions to ${escapeHtml(String(t.lastDate))} · <a href="#" onclick="saTdForget();return false" style="color:#64748b">change key</a></div>`);
+  rows.push(`<div style="font-size:.74rem;color:#64748b;margin-top:2px">Daily prices: ${escapeHtml(src || 'Twelve Data')} · ${t.days} sessions to ${escapeHtml(String(t.lastDate))} · <a href="#" onclick="saTrendShowSetup();return false" style="color:#64748b">settings</a></div>`);
   return rows.join('');
 }
 
-function saTdKeyFormHtml(msg) {
+// Daily prices for part 2. Main source: Yahoo via the user's own Apps
+// Script (same /exec URL as the cash-runway setting): ?chart=1 gives 5 years
+// of daily closes, the default mode gives last-session volume vs its
+// 50-day average (RVOL). Twelve Data stays as an optional fallback.
+const saGasTrendCache = {};
+function saFetchGasCandles(symbol) {
+  const base = gasGetUrl();
+  if (!base) return Promise.resolve({ na: 'Apps Script not connected' });
+  const ck = symbol + '|' + base;
+  if (saGasTrendCache[ck]) return saGasTrendCache[ck];
+  const sep = base.indexOf('?') >= 0 ? '&' : '?';
+  const get = q => fetch(base + sep + q).then(r => r.json());
+  const p = (async () => {
+    let ch, rv;
+    try {
+      [ch, rv] = await Promise.all([
+        get('chart=1&symbols=' + encodeURIComponent(symbol)),
+        get('symbols=' + encodeURIComponent(symbol)).catch(() => null),   // RVOL is optional
+      ]);
+    } catch (e) { return { na: 'Apps Script didn\'t respond (offline, or the URL is wrong)', transient: true }; }
+    const c = ch && ch.chart && ch.chart[symbol];
+    if (!c) return { na: (ch && ch.error) ? String(ch.error).slice(0, 140) : 'Apps Script returned no price history' };
+    if (c.error) return { na: 'Yahoo: ' + String(c.error).slice(0, 140) };
+    if (!Array.isArray(c.t) || !Array.isArray(c.c) || !c.c.length) return { na: 'Yahoo returned an empty price history' };
+    const bars = c.c.map((v, i) => ({ t: new Date(c.t[i] * 1000).toISOString().slice(0, 10), c: +v, h: +v, l: +v, v: 0 }))
+      .filter(b => isFinite(b.c));
+    const d = rv && rv.data && rv.data[symbol];
+    const rvol = d && !d.error && isFinite(d.rvol) && d.rvol !== null ? +d.rvol : null;
+    return { bars, rvol, rvolDate: d && d.lastDate };
+  })();
+  saGasTrendCache[ck] = p;
+  p.then(r => { if (r.transient && saGasTrendCache[ck] === p) delete saGasTrendCache[ck]; });
+  return p;
+}
+
+function saTrendSetupHtml(msg) {
+  const gas = gasGetUrl(), td = tdGetKey();
+  const inp = 'flex:1;min-width:160px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:.85rem;background:#fff;color:#0f172a';
+  const btn = 'padding:8px 14px;border:none;border-radius:6px;background:#2563eb;color:#fff;font-weight:600;cursor:pointer';
+  const btn2 = 'padding:8px 12px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#334155;cursor:pointer';
   return `<div class="criteria-item" style="flex-direction:column;align-items:stretch;gap:8px">
     <div style="font-size:.85rem;line-height:1.5">${msg ? `<div style="color:#b91c1c;margin-bottom:4px">${escapeHtml(msg)}</div>` : ''}
       <strong>Moving averages, 50/200 cross, RSI and breakouts</strong> need daily prices, which Finnhub's free plan doesn't include.
-      Add a free <a href="https://twelvedata.com/register" target="_blank" rel="noopener" style="color:#2563eb">Twelve Data</a> key (free plan: 800 requests/day — this uses 1 per ticker). It is stored only in this browser.</div>
+      Paste the /exec URL of your Google Apps Script (the PORTFOLIO.TERM web app) — it reads them from Yahoo. Stored only in this browser.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <input id="saTdKeyInput" type="password" autocomplete="off" placeholder="Twelve Data API key" style="flex:1;min-width:160px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:.85rem;background:#fff;color:#0f172a">
-      <button onclick="saTdSaveKey()" style="padding:8px 14px;border:none;border-radius:6px;background:#2563eb;color:#fff;font-weight:600;cursor:pointer">Save</button>
-    </div></div>`;
+      <input id="saTrendGasInput" type="url" autocomplete="off" value="${escapeHtml(gas)}" placeholder="https://script.google.com/macros/s/…/exec" style="${inp}">
+      <button onclick="saTrendSaveGas()" style="${btn}">Save</button>
+      ${gas ? `<button onclick="saTrendSaveGas(true)" style="${btn2}">Remove</button>` : ''}
+    </div>
+    <details style="font-size:.8rem;color:#475569"${td ? ' open' : ''}><summary style="cursor:pointer">Alternative source: Twelve Data key ${td ? '(set — used if the Apps Script fails)' : '(optional)'}</summary>
+      <div style="margin:6px 0;line-height:1.5">Backup in case Yahoo stops working. Free <a href="https://twelvedata.com/register" target="_blank" rel="noopener" style="color:#2563eb">Twelve Data</a> key, 800 requests/day, 1 per ticker. Used only when the Apps Script isn't set or fails.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <input id="saTdKeyInput" type="password" autocomplete="off" placeholder="${td ? 'key saved — paste to replace' : 'Twelve Data API key'}" style="${inp}">
+        <button onclick="saTdSaveKey()" style="${btn}">Save</button>
+        ${td ? `<button onclick="saTdForget()" style="${btn2}">Remove</button>` : ''}
+      </div></details></div>`;
 }
+// Kept under the old name — earlier code paths call it.
+function saTdKeyFormHtml(msg) { return saTrendSetupHtml(msg); }
 
+function saTrendShowSetup() {
+  const el = document.getElementById('saTrendExt');
+  if (el) el.innerHTML = saTrendSetupHtml('');
+}
+function saTrendSaveGas(remove) {
+  const inp = document.getElementById('saTrendGasInput');
+  const url = remove ? '' : (inp ? inp.value.trim() : '');
+  if (!remove && !/^https:\/\/script\.google(usercontent)?\.com\/.+/.test(url)) {
+    if (inp) { inp.style.borderColor = '#ef4444'; inp.value = ''; inp.placeholder = 'Must be a https://script.google.com/…/exec URL'; }
+    return;
+  }
+  try { if (remove) localStorage.removeItem('svpro_gas_url'); else localStorage.setItem('svpro_gas_url', url); } catch (e) { /* private mode */ }
+  if (saCurrentData) { saLoadTrendExt(saCurrentData); if (document.getElementById('saRunway')) saLoadRunway(saCurrentData).catch(() => {}); }
+}
 function saTdSaveKey() {
   const inp = document.getElementById('saTdKeyInput');
   const key = inp ? inp.value.trim() : '';
@@ -4761,26 +4911,38 @@ function saTdSaveKey() {
 }
 function saTdForget() {
   try { localStorage.removeItem('twelvedata_api_key'); } catch (e) { /* ignore */ }
-  const el = document.getElementById('saTrendExt');
-  if (el) el.innerHTML = saTdKeyFormHtml('');
+  if (saCurrentData) saLoadTrendExt(saCurrentData); else saTrendShowSetup();
 }
 
 async function saLoadTrendExt(data) {
   const el = document.getElementById('saTrendExt');
   if (!el) return;
-  if (!tdGetKey()) { el.innerHTML = saTdKeyFormHtml(''); return; }
+  const gas = gasGetUrl(), td = tdGetKey();
+  if (!gas && !td) { el.innerHTML = saTrendSetupHtml(''); return; }
   el.innerHTML = '<div class="criteria-item"><span>⏳</span><span>Loading daily prices…</span></div>';
   const sym = data.symbol;
-  const r = await saFetchCandles(sym);
+  let r = null, src = '', gasErr = '';
+  if (gas) {
+    const g = await saFetchGasCandles(sym);
+    if (g.na) gasErr = g.na; else { r = g; src = 'Yahoo via your Apps Script'; }
+  }
+  if (!r && td) {
+    const t2 = await saFetchCandles(sym);
+    if (saCurrentData && saCurrentData.symbol !== sym) return;
+    if (t2.badKey && !gas) { const x = document.getElementById('saTrendExt'); if (x) x.innerHTML = saTrendSetupHtml(t2.na); return; }
+    if (t2.na) gasErr = (gasErr ? 'Apps Script: ' + gasErr + ' · ' : '') + 'Twelve Data: ' + t2.na;
+    else { r = t2; src = 'Twelve Data' + (gasErr ? ' (backup — Apps Script failed: ' + gasErr + ')' : ''); }
+  }
   if (saCurrentData && saCurrentData.symbol !== sym) return;
   const target = document.getElementById('saTrendExt');
   if (!target) return;
-  if (r.badKey) { target.innerHTML = saTdKeyFormHtml(r.na); return; }
-  if (r.na) { target.innerHTML = `<div class="criteria-item"><span>–</span><span><strong>n/a</strong> — ${escapeHtml(r.na)} · <a href="#" onclick="saTdForget();return false" style="color:#64748b">change key</a></span></div>`; return; }
+  const setupLink = ' · <a href="#" onclick="saTrendShowSetup();return false" style="color:#64748b">settings</a>';
+  if (!r) { target.innerHTML = `<div class="criteria-item"><span>–</span><span><strong>n/a</strong> — ${escapeHtml(gasErr || 'no price history')}${setupLink}</span></div>`; return; }
   const t = saTrendFromBars(r.bars, safeNum(data.price));
-  if (t.na) { target.innerHTML = `<div class="criteria-item"><span>–</span><span><strong>n/a</strong> — ${escapeHtml(t.na)}</span></div>`; return; }
-  target.innerHTML = saTrendExtHtml(t);
-  // The 50/200 picture is the more reliable trend read → use it for the header.
+  if (t.na) { target.innerHTML = `<div class="criteria-item"><span>–</span><span><strong>n/a</strong> — ${escapeHtml(t.na)}${setupLink}</span></div>`; return; }
+  // Apps Script bars carry no volume → confirm breakouts with its RVOL (last completed session vs 50-day average).
+  if (t.breakout && r.rvol !== undefined) t.breakout.volX = r.rvol;
+  target.innerHTML = saTrendExtHtml(t, src);
   const v = document.getElementById('saTrendVerdict');
   if (v && t.sma200 !== null) {
     v.textContent = t.state;
@@ -5483,7 +5645,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Service Worker registration ───────────────────────────────
 // Bump APP_VERSION AND CACHE_NAME in sw.js together on every deploy.
 // The version check below clears old caches immediately on load.
-const APP_VERSION = '2.7.2';
+const APP_VERSION = '2.7.4';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
