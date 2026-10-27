@@ -3335,6 +3335,7 @@ async function saLoadRunway(data) {
   }
   if (saCurrentData && saCurrentData.symbol !== sym) return;
   if (rw.na && notes.length) rw.na += ' (' + notes.join('; ') + ')';
+  saSnapSet(sym, 'runway', rw);
   let html = saRunwayHtml(rw);
   if (!rw.na && notes.length && !src.yahoo && gasGetUrl()) html += `<div style="font-size:.85em;opacity:.8;margin-top:4px">⚠ ${escapeHtml(notes[0])} — fell back to other sources.</div>`;
   set(html);
@@ -3347,6 +3348,7 @@ function saRenderValuation(data) {
   // instead of $0.00 / SELL, plus the cash runway that matters here.
   if (!val.validVals.length) {
     const rw = saCashRunway(data);
+    saSnapSet(data.symbol, 'runway', rw);
     const needAsync = !!gasGetUrl() || (!!rw.na && !!saGetApiKey());
     const rwHtml = saRunwayHtml(needAsync ? { loading: true } : rw) + saGasFormHtml();
     document.getElementById('saValuation').innerHTML = `
@@ -4289,6 +4291,10 @@ function saExtractSbc(filing) {
 // both callers wait on the same request. Transient failures (network,
 // rate limit, other HTTP errors) are not cached, so a reload retries.
 const saFilingsCache = {};
+// Latest resolved async results per ticker, so Copy / Telegram can include
+// them synchronously (clipboard writes must stay inside the click).
+const saSnap = {};
+function saSnapSet(sym, key, v) { (saSnap[sym] = saSnap[sym] || {})[key] = v; }
 function saFetchFilings(symbol) {
   if (saFilingsCache[symbol]) return saFilingsCache[symbol];
   const p = (async () => {
@@ -4409,6 +4415,7 @@ async function saLoadBurryCheck(data) {
   const r = await saFetchSbc(sym);
   if (saCurrentData && saCurrentData.symbol !== sym) return;   // user already loaded another ticker
   const a = saBurryAssess(data, saCalculateValuation(data), r);
+  saSnapSet(sym, 'burry', a);
   const target = document.getElementById('saBurryBody');
   if (!target) return;
   target.innerHTML = saBurryHtml(a);
@@ -4652,6 +4659,7 @@ async function saLoadRedFlags(data) {
   const fr = await saFetchFilings(sym);
   if (saCurrentData && saCurrentData.symbol !== sym) return;
   const a = saRedFlagsAssess(data, fr);
+  saSnapSet(sym, 'redFlags', a);
   const target = document.getElementById('saRedFlagsBody');
   if (!target) return;
   target.innerHTML = saRedFlagsHtml(a);
@@ -4943,6 +4951,7 @@ async function saLoadTrendExt(data) {
   // Apps Script bars carry no volume → confirm breakouts with its RVOL (last completed session vs 50-day average).
   if (t.breakout && r.rvol !== undefined) t.breakout.volX = r.rvol;
   target.innerHTML = saTrendExtHtml(t, src);
+  saSnapSet(sym, 'trend', t);
   const v = document.getElementById('saTrendVerdict');
   if (v && t.sma200 !== null) {
     v.textContent = t.state;
@@ -5486,18 +5495,120 @@ async function saExportFullPDF() {
   }
 }
 
+// Plain-text summary for Copy / Telegram (Telegram Markdown: *bold*).
+// Pure apart from reading caches — every async block contributes only if
+// it has already loaded, so the clipboard write stays inside the click.
+function saBuildShareText(d) {
+  const val = saCalculateValuation(d);
+  const snap = saSnap[d.symbol] || {};
+  const n = v => safeNum(v);
+  const money = v => '$' + n(v).toFixed(2);
+  const pct = (v, dp = 1) => (v > 0 ? '+' : '') + v.toFixed(dp) + '%';
+  const L = [];
+  const pot = n(val.potential);
+  const unrated = !val.validVals.length;
+  const rec = unrated ? '⚪ Not rated' : pot > 20 ? '🟢 BUY' : pot > 0 ? '🟡 HOLD' : '🔴 SELL';
+
+  L.push(`📊 *${d.name} (${d.symbol})*`);
+  L.push(`💰 ${money(d.price)} · Mkt cap ${saFormatMarketCap(d.marketCap)}`);
+  L.push(`🏢 ${d.sector || 'N/A'} • ${val.profile} profile`);
+
+  // Valuation
+  L.push('', '*💎 Valuation*');
+  if (unrated) {
+    L.push('Fair Value: not rated — no method applies (pre-profit)');
+    const rw = snap.runway;
+    if (rw && !rw.na) L.push(rw.selfFunding ? '💵 Cash runway: FCF positive — self-funding' : `💵 Cash runway: ${rw.months.toFixed(0)} months (cash ${saFormatBigNumber(rw.cash)}, burn ${saFormatBigNumber(rw.burn)}/yr)`);
+  } else {
+    L.push(`Fair Value: ${money(val.fairValue)} (${val.validVals.length} of 8 methods) · ${pct(pot)}`);
+    L.push(`Signal: ${rec}`);
+    if (val.dispersion && n(d.price) > 0) {
+      const mos = (val.dispersion.min / n(d.price) - 1) * 100;
+      L.push(`🛡 Conservative FV: ${money(val.dispersion.min)} · MoS ${pct(mos)}`);
+    }
+    if (val.impliedGrowth !== null && val.impliedGrowth !== undefined && isFinite(val.impliedGrowth)) {
+      const g = val.growth && val.growth.parts && val.growth.parts.length ? val.growth.g : null;
+      L.push(`🔄 Reverse DCF: price implies ${(val.impliedGrowth * 100).toFixed(1)}% growth${g !== null ? ` vs sustainable ${g.toFixed(1)}%` : ''}`);
+    }
+    let sc = null; try { sc = saCalculateScenarios(d, val); } catch (e) { /* optional */ }
+    if (sc) {
+      L.push(`🎯 5Y: Bear ${money(sc.bear.target)} · Base ${money(sc.base.target)} · Bull ${money(sc.bull.target)}`);
+      L.push(`   PW ${money(sc.pwTarget)} (${pct(sc.pwUpside)}, ${pct(sc.pwCagr)}/yr)`);
+    }
+  }
+  if (saAnalystCache[d.symbol]) {
+    const a = saAnalystCache[d.symbol];
+    if (a.rec) {
+      const r = a.rec, tot = n(r.strongBuy) + n(r.buy) + n(r.hold) + n(r.sell) + n(r.strongSell);
+      if (tot > 0) {
+        const bull = (n(r.strongBuy) + n(r.buy)) / tot * 100;
+        L.push(`👥 Analysts: ${n(r.strongBuy) + n(r.buy)} buy · ${n(r.hold)} hold · ${n(r.sell) + n(r.strongSell)} sell (${bull.toFixed(0)}% bullish)`);
+      }
+    }
+    if (a.pt) L.push(`   Target: ${money(a.pt.targetMean)} (${pct((n(a.pt.targetMean) / n(d.price) - 1) * 100)})`);
+  }
+
+  // Metrics
+  const m = [];
+  const add = (label, v, f) => { if (v !== null && v !== undefined && isFinite(v) && v !== 0) m.push(`${label} ${f(v)}`); };
+  const x = v => v.toFixed(1) + '×', p1 = v => v.toFixed(1) + '%';
+  add('P/E', n(d.pe) > 0 ? n(d.pe) : null, x);
+  add('Fwd P/E', n(d.forwardPE) > 0 ? n(d.forwardPE) : null, x);
+  add('EPS', n(d.eps), v => (v < 0 ? '−$' : '$') + Math.abs(v).toFixed(2));
+  add('ROE', n(d.roe), p1);
+  add('Net margin', n(d.profitMargin), p1);
+  add('Op margin', n(d.operatingMargin), p1);
+  add('Rev growth', n(d.revenueGrowth), v => pct(v));
+  add('FCF/sh', n(d.freeCashFlowPerShare), v => (v < 0 ? '−$' : '$') + Math.abs(v).toFixed(2));
+  add('Div yield', n(d.dividendYield), v => v.toFixed(2) + '%');
+  add('D/E', d.debtToEquityReported !== null && d.debtToEquityReported !== undefined ? d.debtToEquityReported : null, v => v.toFixed(2));
+  add('Current ratio', n(d.currentRatio), v => v.toFixed(2));
+  if (m.length) {
+    L.push('', '*📋 Metrics*');
+    for (let i = 0; i < m.length; i += 3) L.push(m.slice(i, i + 3).join(' · '));
+  }
+
+  // Risk
+  const risk = [];
+  try {
+    const ds = saDebtSafety(d);
+    const crit = ds.rows.filter(r => r.score === 0).map(r => r.name + ' ' + r.value);
+    risk.push(`Debt Safety: ${ds.verdict}${crit.length ? ' — ' + crit.join(', ') : ''}`);
+  } catch (e) { /* optional */ }
+  const bu = snap.burry;
+  if (bu && !bu.na) risk.push(`Burry SBC: ${bu.verdict}${bu.pct !== null && bu.pct !== undefined ? ` — SBC ${bu.pct.toFixed(0)}% of FCF` : ''}`);
+  const rf = snap.redFlags;
+  if (rf && !rf.na && rf.scored) {
+    const parts = [];
+    if (!rf.altman.na) parts.push(`Altman ${rf.altman.z.toFixed(2)} ${rf.altman.zone}`);
+    if (!rf.piotroski.na) parts.push(`Piotroski ${rf.piotroski.score}/${rf.piotroski.avail}`);
+    if (!rf.beneish.na) parts.push(`Beneish ${rf.beneish.m.toFixed(2)}${rf.beneish.cls === 'fail' ? ' ⚠' : ''}`);
+    risk.push(`Red Flags: ${rf.verdict}${parts.length ? ' — ' + parts.join(' · ') : ''}`);
+  }
+  if (risk.length) { L.push('', '*🛡 Risk*'); risk.forEach(r => L.push(r)); }
+
+  // Trend
+  const tr = [];
+  const hi = n(d.high52), lo = n(d.low52), px = n(d.price);
+  if (hi > lo && lo > 0 && px > 0) tr.push(`52w range ${Math.round((px - lo) / (hi - lo) * 100)}% ($${lo.toFixed(2)}–$${hi.toFixed(2)})`);
+  if (d.ret26w !== null && d.ret26w !== undefined && isFinite(d.ret26w)) tr.push(`6M ${pct(d.ret26w)}`);
+  if (d.relSP52w !== null && d.relSP52w !== undefined && isFinite(d.relSP52w)) tr.push(`vs S&P 12M ${pct(d.relSP52w)} pp`.replace('% pp', ' pp'));
+  const te = snap.trend;
+  if (te) {
+    if (te.sma200 !== null) tr.unshift(`${te.state} (price ${pct((te.price / te.sma200 - 1) * 100)} vs 200-day)`);
+    if (te.rsi !== null && te.rsi !== undefined) tr.push(`RSI ${te.rsi.toFixed(0)}`);
+    if (te.cross) tr.push(`${te.cross.type} ${te.cross.date}`);
+  }
+  if (tr.length) { L.push('', '*📈 Trend*'); L.push(tr.join(' · ')); }
+
+  L.push('', `Source: Finnhub${snap.trend ? ' + Yahoo/Twelve Data' : ''} · SV Pro ${typeof APP_VERSION !== 'undefined' ? 'v' + APP_VERSION : ''} · not financial advice`);
+  return L.join('\n');
+}
+
 function saCopyToClipboard() {
   try {
     if (!saCurrentData) return;
-    const d   = saCurrentData;
-    const val = saCalculateValuation(d);
-    const pot = safeNum(val.potential);
-    const unrated = !val.validVals.length;
-    const rec = unrated ? '⚪ Not rated' : pot > 20 ? '🟢 BUY' : pot > 0 ? '🟡 HOLD' : '🔴 SELL';
-    const pe  = safeNum(d.pe)  > 0 ? safeNum(d.pe).toFixed(2)  : 'N/A';
-    const eps = safeNum(d.eps) !== 0 ? '$' + safeNum(d.eps).toFixed(2) : 'N/A';
-    const roe = safeNum(d.roe) !== 0 ? safeNum(d.roe).toFixed(2) + '%' : 'N/A';
-    const text = `📊 *${d.name} (${d.symbol})*\n\n💰 Price: $${safeNum(d.price).toFixed(2)}\n🏢 Sector: ${d.sector || 'N/A'} • ${val.profile} profile\n\n*Valuation*\n${unrated ? 'Fair Value: not rated — no method applies (pre-profit)' : `Fair Value: $${safeNum(val.fairValue).toFixed(2)} (${val.validVals.length} methods)\nUpside: ${pot > 0 ? '+' : ''}${pot.toFixed(1)}%`}\nSignal: ${rec}\n\n*Metrics*\nP/E: ${pe}\nEPS: ${eps}\nROE: ${roe}\n\nSource: Finnhub API`;
+    const text = saBuildShareText(saCurrentData);
     navigator.clipboard.writeText(text)
       .then(() => saShowNotification('✓ Copied!'))
       .catch(() => saShowNotification('⚠️ Clipboard unavailable'));
@@ -5645,7 +5756,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Service Worker registration ───────────────────────────────
 // Bump APP_VERSION AND CACHE_NAME in sw.js together on every deploy.
 // The version check below clears old caches immediately on load.
-const APP_VERSION = '2.7.4';
+const APP_VERSION = '2.7.5';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
